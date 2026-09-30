@@ -1,0 +1,2 @@
+import React from 'react';import{createRoot}from'react-dom/client';import'./style.css';
+function App(){const[s,setS]=React.useState<any>(null);React.useEffect(()=>{fetch('http://localhost:8000/api/dashboard/summary').then(r=>r.json()).then(setS)},[]);return <main><h1>Greenhouse MAS</h1><p>实时温室多智能体控制台</p><section><h2>传感器</h2><pre>{JSON.stringify(s?.sensor,null,2)}</pre></section><section><h2>系统状态</h2><p>Agents: {s?.agents??0}　待审批: {s?.pending_hitl??0}</p></section></main>}createRoot(document.getElementById('root')!).render(<App/>);

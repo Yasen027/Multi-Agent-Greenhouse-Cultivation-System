@@ -1,0 +1,10 @@
+app_name: Greenhouse MAS
+database: greenhouse.db
+mqtt_topic: greenhouse/sensors/#
+crop_identification:
+  enabled: true
+  interval_hours: 168
+  run_on_startup: true
+  run_on_new_season: true
+  run_on_crop_change: true
+  run_on_profile_mismatch: true
