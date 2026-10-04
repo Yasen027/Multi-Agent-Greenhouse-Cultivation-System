@@ -8,3 +8,9 @@ crop_identification:
   run_on_new_season: true
   run_on_crop_change: true
   run_on_profile_mismatch: true
+deepseek:
+  base_url: https://api.deepseek.com/v1
+  model: deepseek-chat
+  vision_model: deepseek-chat
+  timeout_seconds: 30
+  retries: 2

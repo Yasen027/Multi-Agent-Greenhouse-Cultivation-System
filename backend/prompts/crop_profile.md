@@ -1,0 +1,2 @@
+Return JSON only with crop, stage, temperature_min, temperature_max, humidity_min, humidity_max, light_min, light_max, co2_min, co2_max, ph, ec, soil_moisture_min, soil_moisture_max, water_need, disease_risks and optional stages.
+Generate conservative greenhouse targets for {{crop}} in stage {{stage}}. Existing fallback profile: {{crop_profile_json}}. Sensor={{sensor_data_json}} history={{history_json}} weather={{weather_json}}.

@@ -6,6 +6,7 @@ class SensorReading(BaseModel):
 class CropTriggerRequest(BaseModel):
  reason:str='manual'
  image_url:Optional[str]=None
+ user_input:Optional[str]=None
  metadata:Optional[dict]=None
  force:bool=False
  interval_hours:Optional[int]=None

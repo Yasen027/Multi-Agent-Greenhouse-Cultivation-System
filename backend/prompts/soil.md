@@ -1,0 +1,1 @@
+Analyze soil pH, EC and moisture using crop={{crop}}, stage={{stage}}, profile={{crop_profile_json}}, sensors={{sensor_data_json}}, history={{history_json}}, weather={{weather_json}}. Return JSON findings, recommendations and risk_level; never auto-apply chemicals.
