@@ -1,0 +1,1 @@
+Analyze irrigation for crop={{crop}}, stage={{stage}} against profile={{crop_profile_json}}, sensors={{sensor_data_json}}, weather={{weather_json}}, actuator={{actuator_state}}. Return JSON findings, recommendations, risk_level and confidence.

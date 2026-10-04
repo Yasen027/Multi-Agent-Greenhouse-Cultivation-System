@@ -1,0 +1,1 @@
+Fuse specialist JSON outputs into safe actuator commands. Crop={{crop}}, stage={{stage}}, agents={{agents_json}}, actuator={{actuator_state}}, safety={{safety_rules}}. Return commands only after HITL/safety review; never execute chemical actions.

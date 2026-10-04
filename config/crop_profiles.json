@@ -1,0 +1,26 @@
+{
+  "tomato": {
+    "stage": "vegetative",
+    "temperature_min": 18.0,
+    "temperature_max": 30.0,
+    "humidity_min": 55.0,
+    "humidity_max": 80.0,
+    "light_min": 300.0,
+    "light_max": 1000.0,
+    "co2_min": 400.0,
+    "co2_max": 1200.0,
+    "ph": 6.2,
+    "ec": 2.5,
+    "soil_moisture_min": 35.0,
+    "soil_moisture_max": 70.0,
+    "water_need": "medium_high",
+    "disease_risks": [
+      "gray_mold",
+      "late_blight"
+    ],
+    "crop": "tomato",
+    "updated_at": "2026-10-04T16:37:19.544910",
+    "stages": {},
+    "profile_source": "local_fallback"
+  }
+}

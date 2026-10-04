@@ -1,3 +1,4 @@
+import asyncio
 from fastapi import APIRouter
 from .. import state
 from ..schemas import CropTriggerRequest
@@ -5,24 +6,92 @@ from ..agents.orchestrator import run_all
 from ..agents.decision_agent import decision_agent
 from ..agents.hitl_agent import hitl_agent
 from ..crop_identification_agent import identify_crop
+from ..crop_profile import analyze_crop_conditions, analyze_crop_conditions_async
 from ..crop_trigger import manager
-from ..services import audit
+from ..services import audit, safety
+from ..tools.actuator_tool import dispatch_commands
 from uuid import uuid4
 router=APIRouter(prefix='/api/agents',tags=['agents'])
 NAMES=['soil','temperature','humidity','pest','irrigation','light_co2','crop_stage','crop_identification']
 @router.post('/run')
 async def run():
- state.agent_cache=list(await run_all(state.latest,state.crop_profile)); commands=decision_agent.fuse(state.agent_cache); check=hitl_agent.evaluate(state.latest,commands); reasons=check['reasons']; d={'id':str(uuid4()),'priority_actions':commands,'human_intervention':check['status']!='allow','explanation_for_farmer':'; '.join(reasons) or 'Routine environmental optimization','audit':{'agents':state.agent_cache}}; state.decisions.insert(0,d); audit('decision',d)
- if d['human_intervention']: state.hitl.insert(0,{'id':str(uuid4()),'decision_id':d['id'],'reason':'; '.join(reasons),'status':'pending'})
+ profile_confidence=float(state.crop_profile.get('confidence') or 1.0)
+ if (not state.crop_profile.get('crop') or profile_confidence < 0.7) and state.latest.image_url:
+  identification=await asyncio.to_thread(identify_crop, state.latest.image_url, {'device_id':state.latest.device_id})
+  state.last_crop_identification=identification
+  if not identification['human_intervention']['required']:
+   sensor_data=state.latest.model_dump() if hasattr(state.latest,'model_dump') else state.latest.dict()
+   state.crop_profile=await analyze_crop_conditions_async(identification['crop'], context={'sensor_data':sensor_data})
+   audit('crop_profile_analysis', state.crop_profile)
+  else:
+   state.hitl.insert(0, {'id':str(uuid4()), 'type':'crop_identification', 'reason':identification['human_intervention']['reason'], 'question':identification['human_intervention']['question_to_human'], 'status':'pending'})
+  audit('crop_identification', identification)
+ state.agent_cache=list(await run_all(state.latest,state.crop_profile)); commands=decision_agent.fuse(state.agent_cache, {'crop_profile':state.crop_profile,'actuator_state':state.actuator_state,'safety_rules':{'temperature_max':40,'temperature_min':5,'ph_min':4,'ph_max':8}}); check=hitl_agent.evaluate(state.latest,commands); reasons=list(check['reasons']); d={'id':str(uuid4()),'priority_actions':commands,'human_intervention':check['status']!='allow','explanation_for_farmer':'; '.join(reasons) or 'Routine environmental optimization','audit':{'agents':state.agent_cache}}
+ gate, safety_reasons = safety(state.latest, commands)
+ reasons.extend(safety_reasons)
+ low_confidence = [a.get('agent') for a in state.agent_cache if a.get('agent') not in ('crop_identification', 'crop_stage') and float(a.get('confidence') or 1.0) < 0.7]
+ if low_confidence: reasons.append('low confidence agents: ' + ','.join(low_confidence))
+ crop_pending = bool((state.last_crop_identification or {}).get('human_intervention', {}).get('required'))
+ if crop_pending: reasons.append('crop identification requires human confirmation')
+ safety_block = check['status'] != 'allow' or gate != 'allow' or bool(low_confidence)
+ d['human_intervention'] = safety_block or crop_pending
+ d['explanation_for_farmer'] = '; '.join(dict.fromkeys(reasons)) or 'Routine environmental optimization'
+ if safety_block:
+  d['dispatch'] = {'status': 'blocked_by_safety', 'count': len(commands)}
+  state.hitl.insert(0,{'id':str(uuid4()),'decision_id':d['id'],'reason':d['explanation_for_farmer'],'status':'pending'})
+ else:
+  d['dispatch'] = dispatch_commands(commands)
+  if d['dispatch'].get('status') == 'published':
+   for command in commands: state.actuator_state[command['actuator']] = command.get('action')
+ state.decisions.insert(0,d); audit('decision',d)
  return d
 @router.get('/status')
 def status(): return state.agent_cache or [{'agent':n,'status':'idle','confidence':0.0} for n in NAMES]
 @router.post('/crop-identification')
-def identify(payload:dict): return identify_crop(payload.get('image_url'),payload.get('metadata'),payload.get('user_input',''))
+def identify(payload:dict):
+ result=identify_crop(payload.get('image_url'),payload.get('metadata'),payload.get('user_input',''))
+ state.last_crop_identification=result
+ if result['human_intervention']['required']:
+  state.hitl.insert(0, {'id':str(uuid4()), 'type':'crop_identification', 'reason':result['human_intervention']['reason'], 'question':result['human_intervention']['question_to_human'], 'status':'pending'})
+ audit('crop_identification', result)
+ return result
 @router.post('/crop-identification/run')
 def run_crop(req:CropTriggerRequest):
  if req.interval_hours is not None: manager.interval_hours=max(1,req.interval_hours)
  if not manager.should_run(req.reason,req.force,req.reason=='profile_mismatch'): return {'triggered':False,'reason':'not_due','status':manager.status(),'profile':state.crop_profile}
- result=identify_crop(req.image_url or state.latest.image_url,req.metadata or {'device_id':state.latest.device_id}); state.crop_profile=result; manager.current_crop=result['crop']; manager.mark(req.reason); audit('crop_identification',{'trigger':req.reason,'result':result}); return {'triggered':True,'reason':req.reason,'status':manager.status(),'profile':result}
+ result=identify_crop(req.image_url or state.latest.image_url,req.metadata or {'device_id':state.latest.device_id}, req.user_input or '')
+ state.last_crop_identification=result
+ if result['human_intervention']['required'] or result['crop'] == 'unknown':
+  hitl_item={'id':str(uuid4()),'reason':result['human_intervention']['reason'],'question':result['human_intervention']['question_to_human'],'status':'pending','type':'crop_identification'}
+  state.hitl.insert(0,hitl_item); audit('crop_identification_pending',{'trigger':req.reason,'result':result})
+  return {'triggered':True,'reason':'human_confirmation_required','status':manager.status(),'profile':state.crop_profile,'identification':result,'hitl':hitl_item}
+ sensor_data=state.latest.model_dump() if hasattr(state.latest,'model_dump') else state.latest.dict()
+ profile=analyze_crop_conditions(result['crop'], context={'sensor_data': sensor_data})
+ profile['confidence']=result['confidence']; profile['identification_method']=result['method']
+ state.crop_profile=profile; manager.current_crop=result['crop']; manager.mark(req.reason)
+ audit('crop_identification',{'trigger':req.reason,'result':result,'profile':profile})
+ return {'triggered':True,'reason':req.reason,'status':manager.status(),'profile':profile,'identification':result}
+
+
+@router.post('/crop-identification/analyze')
+def analyze_crop(payload:dict):
+ crop=payload.get('crop') or (state.crop_profile or {}).get('crop')
+ profile=analyze_crop_conditions(crop or 'unknown', payload.get('stage','unknown'), payload)
+ if profile.get('crop') != 'unknown': state.crop_profile=profile
+ audit('crop_profile_analysis', profile)
+ return profile
+
+
+@router.post('/crop-identification/confirm')
+def confirm_crop(payload:dict):
+ crop=str(payload.get('crop','unknown')).lower().strip()
+ if crop not in ('tomato','lettuce','strawberry','cucumber','pepper'):
+  return {'status':'rejected','reason':'unsupported crop'}
+ profile=analyze_crop_conditions(crop, payload.get('stage','unknown'), payload)
+ state.crop_profile=profile; state.last_crop_identification={'crop':crop,'confidence':1.0,'method':'human_confirmation','human_intervention':{'required':False}}
+ for item in state.hitl:
+  if item.get('type')=='crop_identification' and item.get('status')=='pending': item['status']='resolved'
+ manager.current_crop=crop; manager.mark('human_confirmation'); audit('crop_identification_confirmed', profile)
+ return {'status':'confirmed','profile':profile}
 @router.get('/crop-identification/status')
-def crop_status(): return {'profile':state.crop_profile,'trigger':manager.status()}
+def crop_status(): return {'profile':state.crop_profile,'identification':state.last_crop_identification,'trigger':manager.status()}
