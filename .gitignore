@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+
+# Node / 前端
+node_modules/
+frontend/dist/
+
+# 数据与运行时产物
+greenhouse.db
+*.log
+.DS_Store
+Thumbs.db
+
+# 密钥
+.env
+.env.*
