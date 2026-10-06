@@ -112,7 +112,6 @@ flowchart LR
 └── requirements.txt          # 后端依赖
 ```
 
-> 逐文件职责与"已接入 / 部分实现 / 占位"状态的完整地图见 [docs/project-map.md](docs/project-map.md)。
 
 ---
 
