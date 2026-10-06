@@ -11,6 +11,7 @@ frontend/dist/
 # 数据与运行时产物
 greenhouse.db
 *.log
+data/logs/
 .DS_Store
 Thumbs.db
 
