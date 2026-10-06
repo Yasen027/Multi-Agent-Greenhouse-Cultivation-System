@@ -86,7 +86,7 @@ flowchart LR
 | 文件 | 功能 | 状态 |
 |---|---|---|
 | `README.md` | 项目简介、启动命令和粗粒度结构导览。 | 已接入/概览 |
-| `requirements.txt` | FastAPI、Uvicorn、Pydantic、httpx、pytest、paho-mqtt 等后端依赖。 | 已接入 |
+| `requirements.txt` | FastAPI、Uvicorn、Pydantic、httpx、pytest、paho-mqtt 等后端依赖（阶段 1 已固定版本）。 | 已接入/已固定 |
 | `docker-compose.yml` | 启动 API 与前端开发容器；容器内安装依赖并运行 Uvicorn/Vite。 | 部分实现 |
 | `greenhouse.db` | SQLite 运行产物，主要保存 `audit` 表。 | 运行产物 |
 
@@ -251,10 +251,12 @@ flowchart LR
 | `docs/database.md` | SQLite 审计表及未来 PostgreSQL/Alembic 建议。 |
 | `docs/deployment.md` | pip、uvicorn、docker compose 启动方法。 |
 | `docs/frontend.md` | Vite + React + TypeScript 前端说明。 |
+| `docs/implementation-status.md` | 阶段 1 实施状态：验收核对、可用入口、占位模块、已知限制、初始问题清单。 |
 | `docs/hardware.md` | 传感器、继电器和断电安全要求。 |
 | `docs/mqtt.md` | 传感器/执行器主题和 JSON 约定。 |
 | `docs/operations.md` | 健康检查、审计查询、数据库位置。 |
 | `docs/safety.md` | 极端温度、危险 pH、农药命令的人工审批原则。 |
+| `docs/setup.md` | 阶段 1 统一环境搭建与启动说明（venv、pnpm、统一测试命令）。 |
 | `docs/testing.md` | pytest 和仿真脚本用法。 |
 | `docs/troubleshooting.md` | 端口、HITL、SQLite 排查提示。 |
 | `docs/user_manual.md` | 安装、启动、访问 `/docs` 和运行仿真。 |

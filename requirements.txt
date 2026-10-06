@@ -1,6 +1,8 @@
-fastapi
-uvicorn[standard]
-pydantic
-httpx
-pytest
-paho-mqtt
+# 后端依赖（已固定版本，保证可重复安装）
+# 要求 Python 3.12（在 3.12.14 上验证）
+fastapi==0.142.2
+uvicorn[standard]==0.54.0
+pydantic==2.13.5
+httpx==0.28.1
+pytest==9.1.1
+paho-mqtt==2.1.0
