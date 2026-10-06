@@ -22,7 +22,9 @@ const AGENT_META: Record<string, { label: string; icon: string }> = {
 export function AgentCard({ agent }: { agent: AgentStatus }) {
   const meta = AGENT_META[agent.agent] ?? { label: agent.agent, icon: '🤖' };
   const statusOk = agent.status === 'ok';
-  const risk = RISK_TEXT[agent.risk_level] ?? agent.risk_level;
+  const statusText = statusOk ? '正常' : agent.status === 'idle' ? '待命' : agent.status || '待命';
+  const risk = agent.risk_level ? (RISK_TEXT[agent.risk_level] ?? agent.risk_level) : '—';
+  const riskClass = agent.risk_level ? `risk-${String(agent.risk_level).toLowerCase()}` : '';
   const confidencePct = Math.round(Math.min(1, Math.max(0, Number(agent.confidence) || 0)) * 100);
 
   return (
@@ -36,9 +38,7 @@ export function AgentCard({ agent }: { agent: AgentStatus }) {
           <p className="agent-id">{agent.agent}</p>
         </div>
         <span className={`status-dot ${statusOk ? 'ok' : 'idle'}`} aria-hidden="true" />
-        <span className={`badge ${statusOk ? 'badge-normal' : 'badge-idle'}`}>
-          {statusOk ? '正常' : agent.status || '待命'}
-        </span>
+        <span className={`badge ${statusOk ? 'badge-normal' : 'badge-idle'}`}>{statusText}</span>
       </header>
 
       <div className="agent-stats">
@@ -51,7 +51,7 @@ export function AgentCard({ agent }: { agent: AgentStatus }) {
         </div>
         <div className="stat">
           <p className="stat-label">风险等级</p>
-          <p className={`stat-value risk-${String(agent.risk_level).toLowerCase()}`}>{risk}</p>
+          <p className={`stat-value ${riskClass}`}>{risk}</p>
         </div>
       </div>
 
