@@ -117,8 +117,9 @@ Python 建议使用 3.11。
 ```bash
 python -m venv .venv
 
-# Windows PowerShell
-.\.venv\Scripts\Activate.ps1
+# 在项目根目录Windows PowerShell
+
+.\.venv\Scripts\python.exe -m uvicorn backend.app.main:app --reload --host 0.0.0.0 --port 8000
 
 # macOS / Linux
 # source .venv/bin/activate
