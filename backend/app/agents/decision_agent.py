@@ -1,29 +1,37 @@
 from ..prompt_loader import prompt_loader
 from ..schemas import ActuatorCommand
+from ..action_registry import action_alert, get_action
 
 
 class DecisionFusionAgent:
  def fuse(self, outputs, context=None):
   context = context or {}
   profile = context.get('crop_profile') or {}
-  mapping = {
-   'ventilation_on': ('ventilation', 'on'), 'ventilation_off': ('ventilation', 'off'),
-   'irrigation_on': ('irrigation', 'on'), 'irrigation_off': ('irrigation', 'off'),
-   'heating_on': ('heating', 'on'), 'heating_off': ('heating', 'off'),
-   'mist_on': ('mister', 'on'), 'supplemental_light_on': ('grow_light', 'on'),
-   'shade_on': ('shade', 'on'), 'co2_on': ('co2', 'on'),
-   'fan_on': ('fan', 'on'), 'fan_off': ('fan', 'off'),
-  }
+  self.last_alerts = []
+  self.last_hitl_actions = []
   commands=[]; seen=set()
   for agent in outputs or []:
    for rec in agent.get('recommendations',[]) or []:
-    if rec not in mapping: continue
-    actuator, action = mapping[rec]
+    spec = get_action(rec)
+    if spec is None:
+     self.last_alerts.append(action_alert(rec, agent.get('agent','agent')))
+     self.last_hitl_actions.append(rec)
+     continue
+    if spec.kind != 'command' and not spec.actuator:
+     alert = action_alert(rec, agent.get('agent','agent'))
+     self.last_alerts.append(alert)
+     if spec.requires_hitl: self.last_hitl_actions.append(rec)
+     continue
+    actuator, action = spec.actuator, spec.action
     key=(actuator, action)
     if key in seen: continue
     seen.add(key)
     command = ActuatorCommand(actuator=actuator, action=action, reason=agent.get('agent','agent'))
-    commands.append(command.model_dump() if hasattr(command, 'model_dump') else command.dict())
+    command_data = command.model_dump() if hasattr(command, 'model_dump') else command.dict()
+    commands.append(command_data)
+    if spec.requires_hitl:
+     self.last_hitl_actions.append(rec)
+     self.last_alerts.append(action_alert(rec, agent.get('agent','agent')))
   self.last_prompt = prompt_loader.load('decision_fusion', {
    'crop': context.get('crop', profile.get('crop', 'unknown')), 'stage': context.get('stage', profile.get('stage', 'unknown')),
    'crop_profile_json': profile, 'agents_json': outputs or [], 'actuator_state': context.get('actuator_state',{}),

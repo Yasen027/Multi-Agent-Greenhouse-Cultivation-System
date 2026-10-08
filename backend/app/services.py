@@ -1,4 +1,5 @@
 from datetime import datetime
+from .action_registry import validate_commands
 _events=[]
 try:
  from .db.session import init_db,save_audit
@@ -15,4 +16,5 @@ def safety(reading, commands):
  if reading.temperature>40: reasons.append('extreme temperature')
  if reading.ph<4 or reading.ph>8: reasons.append('unsafe pH')
  if any(c.get('actuator')=='pesticide' for c in commands): reasons.append('chemical pesticide')
+ reasons.extend(validate_commands(commands))
  return ('need_hitl',reasons) if reasons else ('allow',[])

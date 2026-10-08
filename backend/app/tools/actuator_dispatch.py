@@ -4,11 +4,9 @@ import json
 import logging
 import os
 from typing import Any, Dict, Iterable
+from ..action_registry import ALLOWED_ACTUATORS
 
 logger = logging.getLogger(__name__)
-ALLOWED_ACTUATORS = {'ventilation', 'irrigation', 'heating', 'mister', 'grow_light', 'shade', 'co2', 'fan'}
-
-
 def dispatch_commands(commands: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
     commands = list(commands or [])
     unsafe = [command for command in commands if command.get('actuator') not in ALLOWED_ACTUATORS]
