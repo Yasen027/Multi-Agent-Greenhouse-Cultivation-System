@@ -7,6 +7,7 @@ import { usePolling } from '../hooks/usePolling';
 import { api, describeError } from '../services/api';
 import type { AuditEvent } from '../types';
 import { formatTime, summarizePayload } from '../utils/format';
+import { translateEvent } from '../utils/i18n';
 
 /** 事件类型 → 徽章配色 */
 function badgeClass(event: string): string {
@@ -64,7 +65,7 @@ export function History() {
             className={`chip chip-filter ${filter === name ? 'chip-active' : ''}`}
             onClick={() => setFilter(name)}
           >
-            {name}
+            {translateEvent(name)}
           </button>
         ))}
       </div>
@@ -78,7 +79,7 @@ export function History() {
           {events.map((e: AuditEvent, i) => (
             <li key={`${e.timestamp}-${i}`} className="history-item">
               <div className="history-main">
-                <span className={`badge ${badgeClass(e.event)}`}>{e.event}</span>
+                <span className={`badge ${badgeClass(e.event)}`}>{translateEvent(e.event)}</span>
                 <details className="payload">
                   <summary className="payload-summary">{summarizePayload(e.payload)}</summary>
                   <pre className="payload-full">{summarizePayload(e.payload, 4000)}</pre>

@@ -211,7 +211,7 @@ export function GreenhouseMap() {
 
             {/* 标题 */}
             <text x="400" y="18" textAnchor="middle" fontSize="15" fontWeight="700" fill="#173b2a">
-              温室布局 · Greenhouse Map
+              温室布局
             </text>
           </svg>
 

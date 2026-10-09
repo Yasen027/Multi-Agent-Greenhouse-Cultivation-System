@@ -1,6 +1,7 @@
 /** 单个智能体的运行状态卡片：状态、置信度、风险等级、发现与建议 */
 
 import type { AgentStatus } from '../types';
+import { translateFinding, translateRecommendation } from '../utils/i18n';
 
 const RISK_TEXT: Record<string, string> = {
   low: '低风险',
@@ -61,7 +62,7 @@ export function AgentCard({ agent }: { agent: AgentStatus }) {
           <ul className="chip-list">
             {agent.findings.map((f) => (
               <li key={f} className="chip chip-finding">
-                {f}
+                {translateFinding(f)}
               </li>
             ))}
           </ul>
@@ -76,7 +77,7 @@ export function AgentCard({ agent }: { agent: AgentStatus }) {
           <ul className="chip-list">
             {agent.recommendations.map((r) => (
               <li key={r} className="chip chip-action">
-                {r}
+                {translateRecommendation(r)}
               </li>
             ))}
           </ul>

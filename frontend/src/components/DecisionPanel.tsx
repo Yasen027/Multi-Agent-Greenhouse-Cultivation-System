@@ -1,6 +1,7 @@
 /** 最新决策面板：展示融合命令、人工介入状态、执行器分发结果与对农户说明 */
 
 import type { Decision, DispatchResult } from '../types';
+import { translateAction, translateActuator, translateDecisionText } from '../utils/i18n';
 import { EmptyState } from './StatusViews';
 
 const DISPATCH_TEXT: Record<string, string> = {
@@ -52,7 +53,9 @@ export function DecisionPanel({ decision, onRun, running = false }: DecisionPane
             ) : null}
           </div>
 
-          <p className="farmer-note">{decision.explanation_for_farmer ?? '（暂无说明）'}</p>
+          <p className="farmer-note">
+            {decision.explanation_for_farmer ? translateDecisionText(decision.explanation_for_farmer) : '（暂无说明）'}
+          </p>
 
           {decision.priority_actions?.length ? (
             <div className="table-wrap">
@@ -67,13 +70,13 @@ export function DecisionPanel({ decision, onRun, running = false }: DecisionPane
                 <tbody>
                   {decision.priority_actions.map((cmd, i) => (
                     <tr key={`${cmd.actuator}-${cmd.action}-${i}`}>
-                      <td className="mono">{cmd.actuator}</td>
+                      <td>{translateActuator(cmd.actuator)}</td>
                       <td>
                         <span className={`badge ${cmd.action === 'on' ? 'badge-action-on' : 'badge-action-off'}`}>
-                          {cmd.action}
+                          {translateAction(cmd.action)}
                         </span>
                       </td>
-                      <td className="muted">{cmd.reason || '—'}</td>
+                      <td className="muted">{cmd.reason ? translateDecisionText(cmd.reason) : '—'}</td>
                     </tr>
                   ))}
                 </tbody>

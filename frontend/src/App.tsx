@@ -60,7 +60,6 @@ export default function App() {
           </span>
           <div>
             <h1 className="brand-title">温室多智能体控制台</h1>
-            <p className="brand-sub">Multi-Agent Greenhouse Cultivation System</p>
           </div>
         </div>
         <HealthDot />

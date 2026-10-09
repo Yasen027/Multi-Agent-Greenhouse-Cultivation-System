@@ -6,12 +6,7 @@ import { EmptyState, Loading } from '../components/StatusViews';
 import { usePolling } from '../hooks/usePolling';
 import { api, describeError } from '../services/api';
 import type { HitlRequest } from '../types';
-
-const TYPE_LABEL: Record<string, string> = {
-  crop_identification: '🌾 作物识别确认',
-  actuator_command: '🎛️ 执行器命令审批',
-  decision: '🧭 决策审批',
-};
+import { translateDecisionText, translateHitlType, translateStatus } from '../utils/i18n';
 
 export function HITL() {
   const { data, error, loading, refreshing, refresh, setData } = usePolling(api.getPendingHitl);
@@ -31,7 +26,7 @@ export function HITL() {
       const updated = action === 'approve' ? await api.approveHitl(item.id) : await api.rejectHitl(item.id);
       // 乐观更新：从待审批列表移除已处理项
       setData((prev) => (prev ?? []).filter((x) => x.id !== item.id));
-      showFeedback('success', `已${action === 'approve' ? '批准' : '拒绝'}请求 #${item.id.slice(0, 8)}（状态：${updated.status}）`);
+      showFeedback('success', `已${action === 'approve' ? '批准' : '拒绝'}请求 #${item.id.slice(0, 8)}（状态：${translateStatus(updated.status)}）`);
       void refresh();
     } catch (err) {
       showFeedback('error', describeError(err));
@@ -69,17 +64,19 @@ export function HITL() {
             <li key={item.id} className="card hitl-card">
               <header className="hitl-head">
                 <span className={`badge ${item.type ? 'badge-warning' : 'badge-neutral'}`}>
-                  {TYPE_LABEL[item.type ?? ''] ?? item.type ?? '人工审批'}
+                  {translateHitlType(item.type)}
                 </span>
                 <span className="mono">#{item.id.slice(0, 8)}</span>
-                <span className={`badge ${item.status === 'pending' ? 'badge-warning' : 'badge-neutral'}`}>{item.status}</span>
+                <span className={`badge ${item.status === 'pending' ? 'badge-warning' : 'badge-neutral'}`}>
+                  {translateStatus(item.status)}
+                </span>
               </header>
 
               <div className="hitl-body">
                 {item.reason ? (
                   <p className="hitl-row">
                     <span className="hitl-row-label">拦截原因</span>
-                    <span>{item.reason}</span>
+                    <span>{translateDecisionText(item.reason)}</span>
                   </p>
                 ) : null}
                 {item.question ? (
