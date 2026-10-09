@@ -1,7 +1,7 @@
-"""Small OpenAI-compatible DeepSeek client with JSON parsing and retries.
+"""轻量级 OpenAI 兼容 DeepSeek 客户端，支持 JSON 解析和重试。
 
-The client deliberately uses urllib so the backend does not need another HTTP
-dependency.  When no key is configured, callers can use the local fallback.
+客户端使用标准库 urllib，避免后端额外引入 HTTP 依赖；
+未配置密钥时，调用方可以使用本地回退逻辑。
 """
 
 import asyncio
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 class DeepSeekError(RuntimeError):
-    """Raised when DeepSeek cannot return a usable response."""
+    """DeepSeek 无法返回可用响应时抛出的异常。"""
 
 
 def _json_from_text(value: str) -> Dict[str, Any]:
@@ -50,17 +50,28 @@ class DeepSeekClient:
         timeout: Optional[float] = None,
         retries: Optional[int] = None,
     ):
-        self.api_key = api_key if api_key is not None else os.getenv("DEEPSEEK_API_KEY", "")
-        self.base_url = (base_url or os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")).rstrip("/")
+        self.api_key = (
+            api_key if api_key is not None else os.getenv("DEEPSEEK_API_KEY", "")
+        )
+        self.base_url = (
+            base_url or os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
+        ).rstrip("/")
         self.model = model or os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
-        self.vision_model = vision_model or os.getenv("DEEPSEEK_VISION_MODEL", self.model)
-        self.timeout = float(timeout if timeout is not None else os.getenv("DEEPSEEK_TIMEOUT", "30"))
-        self.retries = max(0, int(retries if retries is not None else os.getenv("DEEPSEEK_RETRIES", "2")))
+        self.vision_model = vision_model or os.getenv(
+            "DEEPSEEK_VISION_MODEL", self.model
+        )
+        self.timeout = float(
+            timeout if timeout is not None else os.getenv("DEEPSEEK_TIMEOUT", "30")
+        )
+        self.retries = max(
+            0,
+            int(retries if retries is not None else os.getenv("DEEPSEEK_RETRIES", "2")),
+        )
         self.last_error: Optional[str] = None
 
     @property
     def available(self) -> bool:
-        return bool(self.api_key or os.getenv('DEEPSEEK_API_KEY', ''))
+        return bool(self.api_key or os.getenv("DEEPSEEK_API_KEY", ""))
 
     def complete_json(
         self,
@@ -82,7 +93,7 @@ class DeepSeekClient:
             "temperature": 0.1,
             "response_format": {"type": "json_object"},
         }
-        api_key = self.api_key or os.getenv('DEEPSEEK_API_KEY', '')
+        api_key = self.api_key or os.getenv("DEEPSEEK_API_KEY", "")
         request = urllib.request.Request(
             self.base_url + "/chat/completions",
             data=json.dumps(payload).encode("utf-8"),
@@ -98,18 +109,33 @@ class DeepSeekClient:
                 with urllib.request.urlopen(request, timeout=self.timeout) as response:
                     body = json.loads(response.read().decode("utf-8"))
                 message = body.get("choices", [{}])[0].get("message", {})
-                content_value = message.get("content", "") if isinstance(message, dict) else ""
+                content_value = (
+                    message.get("content", "") if isinstance(message, dict) else ""
+                )
                 if isinstance(content_value, list):
-                    content_value = "".join(str(part.get("text", "")) for part in content_value if isinstance(part, dict))
+                    content_value = "".join(
+                        str(part.get("text", ""))
+                        for part in content_value
+                        if isinstance(part, dict)
+                    )
                 result = _json_from_text(str(content_value))
                 self.last_error = None
                 return result
-            except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError, ValueError, DeepSeekError) as exc:
+            except (
+                urllib.error.URLError,
+                urllib.error.HTTPError,
+                TimeoutError,
+                OSError,
+                ValueError,
+                DeepSeekError,
+            ) as exc:
                 self.last_error = str(exc)
                 if attempt < self.retries:
-                    time.sleep(0.25 * (2 ** attempt))
+                    time.sleep(0.25 * (2**attempt))
                     continue
-                logger.warning("DeepSeek request failed; local fallback will be used: %s", exc)
+                logger.warning(
+                    "DeepSeek request failed; local fallback will be used: %s", exc
+                )
                 raise DeepSeekError(str(exc)) from exc
         raise DeepSeekError("DeepSeek request failed")
 

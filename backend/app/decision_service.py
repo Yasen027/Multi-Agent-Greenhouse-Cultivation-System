@@ -1,4 +1,4 @@
-"""Reusable decision pipeline for API, sensor and HITL callers."""
+"""供 API、传感器和人工审核调用的可复用决策流水线。"""
 
 import asyncio
 from dataclasses import dataclass, field
@@ -60,7 +60,11 @@ class DispatchResult:
     @classmethod
     def from_value(cls, value: Dict[str, Any]) -> "DispatchResult":
         data = dict(value or {})
-        return cls(str(data.pop("status", "dispatch_failed")), int(data.pop("count", 0) or 0), data)
+        return cls(
+            str(data.pop("status", "dispatch_failed")),
+            int(data.pop("count", 0) or 0),
+            data,
+        )
 
     def to_dict(self) -> Dict[str, Any]:
         result = {"status": self.status, "count": self.count}
@@ -91,18 +95,24 @@ class DecisionResult:
 
 
 class DecisionService:
-    """Runs one complete recognition -> fusion -> safety -> dispatch cycle."""
+    """执行一次完整的识别、融合、安全检查和分发流程。"""
 
     async def run(self, reading: Any = None, trigger: str = "api") -> DecisionResult:
         reading = reading or state.latest
         profile_confidence = float(state.crop_profile.get("confidence") or 1.0)
-        if (not state.crop_profile.get("crop") or profile_confidence < 0.7) and getattr(reading, "image_url", None):
+        if (not state.crop_profile.get("crop") or profile_confidence < 0.7) and getattr(
+            reading, "image_url", None
+        ):
             identification = await asyncio.to_thread(
                 identify_crop, reading.image_url, {"device_id": reading.device_id}
             )
             state.last_crop_identification = identification
             if not identification["human_intervention"]["required"]:
-                sensor_data = reading.model_dump() if hasattr(reading, "model_dump") else reading.dict()
+                sensor_data = (
+                    reading.model_dump()
+                    if hasattr(reading, "model_dump")
+                    else reading.dict()
+                )
                 state.crop_profile = await analyze_crop_conditions_async(
                     identification["crop"], context={"sensor_data": sensor_data}
                 )
@@ -114,7 +124,9 @@ class DecisionService:
                         "id": str(uuid4()),
                         "type": "crop_identification",
                         "reason": identification["human_intervention"]["reason"],
-                        "question": identification["human_intervention"]["question_to_human"],
+                        "question": identification["human_intervention"][
+                            "question_to_human"
+                        ],
                         "status": "pending",
                     },
                 )
@@ -128,7 +140,12 @@ class DecisionService:
             {
                 "crop_profile": state.crop_profile,
                 "actuator_state": state.actuator_state,
-                "safety_rules": {"temperature_max": 40, "temperature_min": 5, "ph_min": 4, "ph_max": 8},
+                "safety_rules": {
+                    "temperature_max": 40,
+                    "temperature_min": 5,
+                    "ph_min": 4,
+                    "ph_max": 8,
+                },
             },
         )
         check = hitl_agent.evaluate(reading, commands)
@@ -137,25 +154,42 @@ class DecisionService:
         reasons.extend(safety_reasons)
         action_alerts = list(getattr(decision_agent, "last_alerts", []))
         action_hitl = list(getattr(decision_agent, "last_hitl_actions", []))
-        reasons.extend(alert["message"] for alert in action_alerts if alert.get("requires_hitl"))
+        reasons.extend(
+            alert["message"] for alert in action_alerts if alert.get("requires_hitl")
+        )
         low_confidence = [
             agent.agent
             for agent in agents
-            if agent.agent not in ("crop_identification", "crop_stage") and agent.confidence < 0.7
+            if agent.agent not in ("crop_identification", "crop_stage")
+            and agent.confidence < 0.7
         ]
         if low_confidence:
             reasons.append("low confidence agents: " + ",".join(low_confidence))
-        crop_pending = bool((state.last_crop_identification or {}).get("human_intervention", {}).get("required"))
+        crop_pending = bool(
+            (state.last_crop_identification or {})
+            .get("human_intervention", {})
+            .get("required")
+        )
         if crop_pending:
             reasons.append("crop identification requires human confirmation")
-        safety_block = check["status"] != "allow" or gate != "allow" or bool(low_confidence) or bool(action_hitl)
+        safety_block = (
+            check["status"] != "allow"
+            or gate != "allow"
+            or bool(low_confidence)
+            or bool(action_hitl)
+        )
         decision = DecisionResult(
             id=str(uuid4()),
             priority_actions=commands,
             human_intervention=safety_block or crop_pending,
-            explanation_for_farmer="; ".join(dict.fromkeys(reasons)) or "Routine environmental optimization",
+            explanation_for_farmer="; ".join(dict.fromkeys(reasons))
+            or "Routine environmental optimization",
             audit={"agents": state.agent_cache},
-            dispatch=DispatchResult("blocked_by_safety", len(commands)) if safety_block else DispatchResult("pending"),
+            dispatch=(
+                DispatchResult("blocked_by_safety", len(commands))
+                if safety_block
+                else DispatchResult("pending")
+            ),
             action_alerts=action_alerts,
         )
         if safety_block:
@@ -197,4 +231,11 @@ async def run_decision(reading: Any = None, trigger: str = "api") -> DecisionRes
     return await decision_service.run(reading, trigger)
 
 
-__all__ = ["AgentResult", "DispatchResult", "DecisionResult", "DecisionService", "decision_service", "run_decision"]
+__all__ = [
+    "AgentResult",
+    "DispatchResult",
+    "DecisionResult",
+    "DecisionService",
+    "decision_service",
+    "run_decision",
+]
