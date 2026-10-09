@@ -1,5 +1,7 @@
-import logging
+"""作物识别 Agent 与工具函数。"""
+
 import asyncio
+import logging
 from typing import Any, Dict, Optional
 
 from .deepseek_client import DeepSeekError, deepseek_client
@@ -8,7 +10,14 @@ from .prompt_loader import prompt_loader
 
 logger = logging.getLogger(__name__)
 
-CROP_HINTS = {'tomato': ('tomato','番茄','西红柿'),'lettuce': ('lettuce','生菜'),'strawberry': ('strawberry','草莓'),'cucumber': ('cucumber','黄瓜'),'pepper': ('pepper','辣椒')}
+# 作物名称提示词：用于从文件名/元数据中模糊匹配作物
+CROP_HINTS = {
+    'tomato': ('tomato', '番茄', '西红柿'),
+    'lettuce': ('lettuce', '生菜'),
+    'strawberry': ('strawberry', '草莓'),
+    'cucumber': ('cucumber', '黄瓜'),
+    'pepper': ('pepper', '辣椒'),
+}
 
 def build_prompt(context: Dict[str, Any]) -> str:
     return prompt_loader.load('crop_identification', context)
@@ -24,7 +33,20 @@ def _hitl(required: bool, reason: str = '', urgency: str = 'none') -> Dict[str, 
 
 def _normalize(result: Dict[str, Any], method: str) -> Dict[str, Any]:
     crop = str(result.get('crop') or result.get('crop_species') or 'unknown').lower().strip()
-    aliases = {'西红柿': 'tomato', '番茄': 'tomato', 'tomatoes': 'tomato', '生菜': 'lettuce', 'lettuces': 'lettuce', '草莓': 'strawberry', 'strawberries': 'strawberry', '黄瓜': 'cucumber', 'cucumbers': 'cucumber', '辣椒': 'pepper', 'peppers': 'pepper'}
+    # 中英文别名到标准作物键的映射
+    aliases = {
+        '西红柿': 'tomato',
+        '番茄': 'tomato',
+        'tomatoes': 'tomato',
+        '生菜': 'lettuce',
+        'lettuces': 'lettuce',
+        '草莓': 'strawberry',
+        'strawberries': 'strawberry',
+        '黄瓜': 'cucumber',
+        'cucumbers': 'cucumber',
+        '辣椒': 'pepper',
+        'peppers': 'pepper',
+    }
     crop = aliases.get(crop, crop)
     try:
         confidence = max(0.0, min(1.0, float(result.get('confidence', 0.0))))
@@ -66,15 +88,29 @@ def identify_crop(image_url: Optional[str] = None, metadata: Optional[Dict[str, 
             return _normalize({'crop': crop, 'confidence': 0.92, 'evidence': text}, 'filename_or_metadata')
     return _normalize({'crop': 'unknown', 'confidence': 0.2, 'evidence': text}, 'fallback')
 
-async def evaluate(reading) -> dict[str,Any]:
- result = await asyncio.to_thread(identify_crop, getattr(reading, 'image_url', None), {'device_id': getattr(reading, 'device_id', '')})
- profile = None
- if result['crop'] in CROP_HINTS and not result['human_intervention']['required']:
-  profile = await analyze_crop_conditions_async(result['crop'])
- return {
-  'agent': 'crop_identification', 'status': 'ok', 'confidence': result['confidence'], 'findings': result,
-  'recommendations': ['set_crop_profile'] if profile else ['request_human_confirmation'],
-  'recommended_actions': ['设置当前作物档案'], 'risk_level': 'low' if result['confidence'] >= 0.7 else 'medium',
-  'crop': result['crop'], 'method': result['method'], 'human_intervention': result['human_intervention'],
-  'crop_profile': profile,
- }
+async def evaluate(reading) -> dict[str, Any]:
+    """异步执行作物识别评估（供编排器/旧接口调用）。"""
+    result = await asyncio.to_thread(
+        identify_crop,
+        getattr(reading, 'image_url', None),
+        {'device_id': getattr(reading, 'device_id', '')},
+    )
+    profile = None
+    # 识别成功且无需人工确认时，进一步分析作物环境档案
+    if result['crop'] in CROP_HINTS and not result['human_intervention']['required']:
+        profile = await analyze_crop_conditions_async(result['crop'])
+
+    risk_level = 'low' if result['confidence'] >= 0.7 else 'medium'
+    return {
+        'agent': 'crop_identification',
+        'status': 'ok',
+        'confidence': result['confidence'],
+        'findings': result,
+        'recommendations': ['set_crop_profile'] if profile else ['request_human_confirmation'],
+        'recommended_actions': ['设置当前作物档案'],
+        'risk_level': risk_level,
+        'crop': result['crop'],
+        'method': result['method'],
+        'human_intervention': result['human_intervention'],
+        'crop_profile': profile,
+    }
