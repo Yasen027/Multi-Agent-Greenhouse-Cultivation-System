@@ -3,14 +3,18 @@ __pycache__/
 *.py[cod]
 .venv/
 .pytest_cache/
+.cache/
 
 # Node / 前端
 node_modules/
 frontend/dist/
+deploy/offline/*.tar
+deploy/offline/*.sha256
 
 # 数据与运行时产物
 greenhouse.db
 *.log
+tmp*cacert.pem
 data/logs/
 .DS_Store
 Thumbs.db

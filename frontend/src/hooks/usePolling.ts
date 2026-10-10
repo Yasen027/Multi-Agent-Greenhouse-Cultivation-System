@@ -29,6 +29,7 @@ export interface PollingResult<T> {
   setData: (updater: T | ((prev: T | null) => T)) => void;
 }
 
+/** 通用轮询 Hook：挂载立即拉取，之后按 intervalMs 间隔刷新；页面隐藏时暂停、恢复可见时补拉；卸载时中止在途请求。 */
 export function usePolling<T>(
   fetcher: (signal: AbortSignal) => Promise<T>,
   intervalMs: number = POLL_INTERVAL_MS,
@@ -49,12 +50,14 @@ export function usePolling<T>(
     fetcherRef.current = fetcher;
   }, [fetcher]);
 
+  // 一次拉取的核心逻辑：background 为 true 时显示 refreshing（保留旧数据），否则显示 loading
   const run = useCallback(async (background: boolean) => {
     if (inFlightRef.current) return; // 跳过重叠请求
     inFlightRef.current = true;
     if (background) setRefreshing(true);
     else setLoading(true);
 
+    // 每次请求独立 AbortController：用于卸载或依赖变化时中止在途请求
     const controller = new AbortController();
     abortRef.current = controller;
     try {
@@ -77,6 +80,7 @@ export function usePolling<T>(
     }
   }, []);
 
+  // 生命周期：首次拉取 + 定时轮询（仅页面可见时执行）+ 可见性恢复补拉 + 卸载清理
   useEffect(() => {
     mountedRef.current = true;
     void run(false);
@@ -100,8 +104,10 @@ export function usePolling<T>(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [intervalMs, ...deps]);
 
+  // 手动刷新入口：以 background 模式立即拉取一次
   const refresh = useCallback(() => run(true), [run]);
 
+  // 就地更新数据（如审批后移除列表项），支持直接赋值或函数式更新
   const setData = useCallback((updater: T | ((prev: T | null) => T)) => {
     setDataState((prev) => (typeof updater === 'function' ? (updater as (p: T | null) => T)(prev) : updater));
   }, []);

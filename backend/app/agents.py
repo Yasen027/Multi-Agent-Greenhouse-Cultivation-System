@@ -20,18 +20,23 @@ async def evaluate(name, reading):
     findings = []
     rec = []
     risk = "low"
+    # 温度高于 30℃：记为高温并建议通风。
     if name == "temperature" and reading.temperature > 30:
         findings.append("temperature high")
         rec.append("ventilation_on")
+    # 湿度高于 80%：建议通风。
     if name == "humidity" and reading.humidity > 80:
         findings.append("humidity high")
         rec.append("ventilation_on")
+    # 土壤湿度低于 30%：记为干旱并建议灌溉。
     if name == "soil" and reading.soil_moisture < 30:
         findings.append("soil dry")
         rec.append("irrigation_on")
+    # 湿度高于 90%：提示真菌病害风险，风险等级上调为 medium。
     if name == "pest" and reading.humidity > 90:
         findings.append("fungal risk")
         risk = "medium"
+    # 规则型 Agent 统一使用固定置信度 0.82（无模型打分时的占位值）。
     return {
         "agent": name,
         "status": "ok",

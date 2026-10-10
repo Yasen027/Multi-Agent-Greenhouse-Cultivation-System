@@ -2,7 +2,7 @@
 
 > **Multi-Agent Greenhouse Cultivation System**：一个面向温室环境的多智能体决策闭环。系统接收传感器读数和可选作物图像，由多个领域 Agent 并行分析，再经过动作注册表、决策融合、安全门和 HITL（Human-in-the-Loop）审核，最后在满足安全条件时通过 MQTT 发布执行器命令。
 
-当前后端版本：`0.2.0` · FastAPI · Python · React · TypeScript · Vite
+当前后端版本：`0.2.0` · FastAPI · Python · React · TypeScript · Vite · MQTT 数字孪生
 
 ## 项目定位
 
@@ -18,7 +18,7 @@
     → 审计、看板和前端展示
 ```
 
-系统默认使用本地规则和本地作物档案，即使不配置 DeepSeek 或 MQTT Broker，也可以完成识别回退、决策分析、安全拦截和测试。
+系统默认使用本地规则和本地作物档案；即使不配置 DeepSeek 或 MQTT Broker，也会自动启用进程内数字孪生，完成识别回退、决策分析、安全拦截和环境闭环。
 
 ## 主要能力
 
@@ -98,9 +98,13 @@ flowchart LR
 
 要求：Docker Desktop 或 Docker Engine + Compose。
 
+首次联网构建：
+
 ```bash
-docker compose up
+docker compose up --build --wait
 ```
+
+比赛现场离线启动时，双击 `start-offline.cmd`。该脚本只加载赛前准备好的镜像包，禁止拉取和重新构建，不会运行 `pip install`、`npm install` 或 `pnpm install`。
 
 服务地址：
 
@@ -108,7 +112,17 @@ docker compose up
 - Swagger 文档：<http://localhost:8000/docs>
 - 前端控制台：<http://localhost:5173>
 
-当前 Compose 文件只启动 API 和前端容器，不包含 MQTT Broker。需要真实 MQTT 下发时，请单独启动 Broker 并设置 `MQTT_BROKER`。
+Compose 会同时启动 Mosquitto、数字孪生、API 和前端，并等待各容器健康检查通过。打开首页即可选择比赛场景，观察“传感器 → 多智能体 → 控制命令/ACK → 下一周期环境”的实时闭环。
+
+赛前联网生成离线镜像包：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/package_offline.ps1
+```
+
+生成的 `deploy/offline/greenhouse-images.tar` 和 SHA-256 校验文件不会提交 Git，应与整个项目目录一起复制到比赛电脑。完整冷启动验收和录屏清单见 [docs/competition/offline-acceptance.md](docs/competition/offline-acceptance.md)。
+
+内置比赛场景包括：正常生产、高温干旱、低温寒潮、弱光低 CO₂、风机故障、灌溉无响应、传感器固定值、异常值和数据超时。首页也可手工开关风机、灌溉、加热、补光灯和 CO₂，验证对应因果变化。
 
 ### 方式二：本地启动后端
 
@@ -142,20 +156,21 @@ curl http://localhost:8000/api/health
 
 ### 本地启动前端
 
-要求：Node.js `>=20.19.0`。前端开发服务器会把 `/api` 和 `/ws` 代理到 `localhost:8000`。
+要求：Node.js `>=22.13.0`。前端开发服务器会把 `/api` 和 `/ws` 代理到 `localhost:8000`。
 
 ```bash
 cd frontend
-npm install
-npm run dev
+corepack enable
+pnpm install --frozen-lockfile
+pnpm run dev
 ```
 
 常用命令：
 
 ```bash
-npm run typecheck
-npm run build
-npm run preview
+pnpm run typecheck
+pnpm run build
+pnpm run preview
 ```
 
 ### 运行模拟数据
@@ -174,6 +189,14 @@ python edge/mqtt/publisher.py
 
 注意：文件名虽然叫 `mqtt/publisher.py`，当前实现实际通过 HTTP `POST /api/sensors/readings` 上报随机读数；它不是传感器 MQTT 输入适配器。
 
+正式的数字孪生入口是：
+
+```bash
+python -m digital_twin.main
+```
+
+本地单独运行且未配置 MQTT Broker 时会自动使用进程内数字孪生；使用 `docker compose up` 时则通过 Mosquitto 运行完整 MQTT 链路。
+
 ## API 概览
 
 完整接口以运行中的 Swagger 为准：<http://localhost:8000/docs>。
@@ -189,6 +212,9 @@ python edge/mqtt/publisher.py
 | `GET` | `/api/audit` | 获取全部内存审计事件 |
 | `GET` | `/api/audit/history?limit=100` | 获取最近审计事件 |
 | `GET` | `/api/config/thresholds` | 获取当前展示用阈值 |
+| `GET` | `/api/digital-twin/scenarios` | 获取内置比赛场景 |
+| `POST` | `/api/digital-twin/scenario` | 通过 MQTT 切换比赛场景 |
+| `GET` | `/api/digital-twin/status` | 获取孪生状态、最近 ACK 和设备诊断结果 |
 
 传感器读数示例：
 
@@ -235,7 +261,8 @@ curl -X POST http://localhost:8000/api/sensors/readings \
 `dispatch.status` 常见值：
 
 - `published`：已发布到 MQTT。
-- `skipped_no_broker`：未配置 Broker，安全跳过发布。
+- `simulated_local`：未配置 Broker，命令已由进程内数字孪生执行。
+- `skipped_no_broker`：旧版兼容状态，表示未配置 Broker 且跳过发布。
 - `blocked_by_safety`：被安全门或 HITL 阻断。
 - `blocked_unsafe_actuator`：执行器不在白名单中。
 - `dispatch_failed`：MQTT 发布过程中发生异常。
@@ -261,7 +288,7 @@ curl -X POST http://localhost:8000/api/sensors/readings \
 | `POST` | `/api/actuators/command` | 提交手工执行器命令，仍经过动作注册和安全门 |
 | `WS` | `/ws/updates` | 返回一次状态快照；当前前端仍使用轮询 |
 
-当前 HITL approve/reject 会更新请求状态并写入审计；批准不会自动重新执行原决策或自动 dispatch，需要后续业务流程显式再次触发决策。
+HITL 批准会使用最新传感器重新运行完整决策与安全检查：安全结果未变化时消费本次授权并下发新生成的命令，风险或命令变化时不执行旧命令，而是生成新的待审批请求；拒绝操作只更新状态并写入审计。
 
 ## 动作注册表与安全策略
 
@@ -317,8 +344,16 @@ grow_light · shade · co2 · fan
 | `DEEPSEEK_VISION_MODEL` | 与文本模型相同 | 图像识别模型 |
 | `DEEPSEEK_TIMEOUT` | `30` | 请求超时秒数 |
 | `DEEPSEEK_RETRIES` | `2` | 重试次数 |
-| `MQTT_BROKER` | 空 | 配置后才实际发布 MQTT 命令 |
+| `MQTT_BROKER` | 空 | Broker 主机；Compose 内固定为 `mosquitto` |
+| `MQTT_PORT` | `1883` | Broker 端口 |
 | `MQTT_ACTUATOR_TOPIC` | `greenhouse/actuators/commands` | 执行器命令主题 |
+| `MQTT_ACK_TOPIC` | `greenhouse/actuators/ack` | 执行结果 ACK 主题 |
+| `MQTT_TWIN_SCENARIO_TOPIC` | `greenhouse/digital-twin/scenario` | 比赛场景切换主题 |
+| `TWIN_INTERVAL_SECONDS` | `2` | 数字孪生推进周期（秒） |
+| `SENSOR_STUCK_COUNT` | `3` | 单个传感器字段连续相同多少次后判定疑似卡死 |
+| `SENSOR_OFFLINE_SECONDS` | `6` | 无有效传感器读数多久后判定离线 |
+| `ACK_TIMEOUT_SECONDS` | `5` | 每条执行器命令等待 ACK 的截止时间 |
+| `ACTUATOR_FAILURE_LIMIT` | `3` | 单执行器连续失败多少次后熔断并创建 HITL |
 | `CROP_PROFILE_PATH` | `config/crop_profiles.json` | 作物档案存储路径 |
 | `VITE_API_BASE` | 空 | 前端生产环境 API 基地址 |
 
@@ -336,10 +371,8 @@ greenhouse/actuators/commands
 
 - `edge/mqtt/subscriber.py`：连接 MQTT 并订阅命令。
 - `edge/mqtt/command_handler.py`：校验执行器白名单并调用可注入 handler。
-- `edge/drivers/`：传感器驱动预留目录。
-- `edge/control/`：执行器控制预留目录。
 
-默认 edge handler 只记录命令，不直接操作真实硬件。接入硬件前必须增加物理急停、断电保护、权限控制和设备级限位。
+默认 edge handler 只记录命令，不直接操作真实硬件；仓库不包含真实设备驱动。接入硬件前必须增加物理急停、断电保护、权限控制和设备级限位。
 
 ## 项目结构
 
@@ -360,9 +393,9 @@ greenhouse/actuators/commands
 │       ├── tools/                   # MQTT dispatch
 │       └── db/                      # SQLite 审计写入
 ├── frontend/                       # React + TypeScript + Vite 控制台
-├── edge/                           # MQTT 订阅器、模拟器和硬件适配预留
-├── config/                         # 作物档案与规划配置
-├── scripts/                        # 模拟、评估和校准脚本
+├── edge/                           # MQTT 订阅器和 HTTP 传感器模拟器
+├── config/                         # 作物档案、安全规则和运行设置
+├── scripts/                        # 模拟与离线镜像制包/启动脚本
 ├── tests/                          # 冒烟、管线、服务和动作注册测试
 ├── docs/                           # API、架构、安全、部署和运维文档
 ├── docker-compose.yml
@@ -393,8 +426,8 @@ python -m pytest -q
 
 ```bash
 cd frontend
-npm run typecheck
-npm run build
+pnpm run typecheck
+pnpm run build
 ```
 
 ## 当前边界与后续工作
@@ -412,9 +445,9 @@ npm run build
 - 运行状态保存在进程内，服务重启后最新读数、决策和待审批列表会丢失；审计可写入 SQLite。
 - `/ws/updates` 当前只发送一次快照，前端使用 4 秒轮询。
 - 专家 Agent 主要是本地规则实现，Prompt 已加载但未统一交给 LLM 执行。
-- Compose 不包含 MQTT Broker，未配置 `MQTT_BROKER` 时不会真实下发。
-- `/api/actuators/command` 当前只更新状态和审计，不直接调用 MQTT dispatch。
-- edge 驱动、真实执行器、病虫害视觉推理和固件目录仍属于扩展接口或预留实现。
+- 非 Compose 启动且未配置 MQTT Broker 时使用进程内回退；该模式不验证网络层 MQTT 行为。
+- 数字孪生采用教学演示用的一阶变化模型，不是作物生理模型或 CFD 模型。
+- 仓库尚未包含真实设备驱动、病虫害视觉推理模型和固件。
 - 配置 YAML 尚未完全统一接入运行时配置加载。
 
 ## 文档导航
@@ -434,7 +467,7 @@ npm run build
 
 ## 安全声明
 
-本项目面向研究、教学和仿真用途，未附带生产级许可证。接入真实温室前，请完成硬件级风险评估，并至少配置：
+本项目采用 [MIT License](LICENSE)，面向研究、教学和仿真用途；该许可证不构成生产安全认证或质量担保。接入真实温室前，请完成硬件级风险评估，并至少配置：
 
 - 物理急停和断电保护。
 - 执行器的独立限位与故障回退。

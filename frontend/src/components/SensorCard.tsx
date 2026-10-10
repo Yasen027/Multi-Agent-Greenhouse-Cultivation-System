@@ -18,6 +18,7 @@ interface SensorCardProps {
   note?: string;
 }
 
+/** 根据数值与可选正常范围判定等级：无值/无范围/NaN → unknown，低于下限 → low，高于上限 → high */
 export function levelOf(value: number | null, min?: number, max?: number): SensorLevel {
   if (value === null || min === undefined || max === undefined || Number.isNaN(value)) return 'unknown';
   if (value < min) return 'low';
@@ -25,6 +26,7 @@ export function levelOf(value: number | null, min?: number, max?: number): Senso
   return 'normal';
 }
 
+// 等级 → 中文文案
 const LEVEL_TEXT: Record<SensorLevel, string> = {
   normal: '正常',
   low: '偏低',
@@ -34,6 +36,7 @@ const LEVEL_TEXT: Record<SensorLevel, string> = {
 
 export function SensorCard({ name, icon, value, unit, min, max, digits = 1, note }: SensorCardProps) {
   const level = levelOf(value, min, max);
+  // 仅配置了有效量程才渲染进度条与范围标签，否则只显示说明文字
   const hasRange = min !== undefined && max !== undefined && min < max;
 
   // 量程进度条位置（夹在 0–100%）

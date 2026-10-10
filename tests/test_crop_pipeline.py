@@ -29,6 +29,7 @@ def test_identification_profile_orchestrator_fusion_chain(monkeypatch):
     assert hitl_agent.evaluate(reading, commands)["status"] == "allow"
     assert dispatch_commands(commands)["status"] in (
         "skipped_no_broker",
+        "simulated_local",
         "published",
         "dispatch_failed",
     )

@@ -40,7 +40,9 @@ export interface DispatchResult {
     | 'published'
     | 'blocked_by_safety'
     | 'blocked_unsafe_actuator'
+    | 'circuit_open'
     | 'skipped_no_broker'
+    | 'simulated_local'
     | 'nothing_to_dispatch'
     | 'dispatch_failed'
     | string;
@@ -80,8 +82,69 @@ export interface DashboardSummary {
   pending_hitl: number;
   /** 已运行的智能体数量 */
   agents: number;
+  digital_twin: DigitalTwinStatus;
+  recent_acks: ActuatorAck[];
 }
 
+/** 执行器确认回执：设备侧对下发命令的执行结果回传 */
+export interface ActuatorAck {
+  command_id?: string | null;
+  actuator: string;
+  action: string;
+  status: 'applied' | 'failed' | string;
+  timestamp: string;
+  error?: string;
+}
+
+/** 数字孪生比赛场景（GET /api/digital-twin/scenarios） */
+export interface TwinScenario {
+  id: string;
+  name: string;
+  description: string;
+}
+
+/** 设备健康问题：传感器/执行器诊断产生的一条具体告警 */
+export interface DeviceHealthIssue {
+  code: 'sensor_stuck' | 'sensor_offline' | 'out_of_range' | 'actuator_failure' | 'circuit_open' | string;
+  severity: 'warning' | 'critical' | string;
+  message: string;
+  sensor?: string;
+  actuator?: string;
+  detected_at: string;
+}
+
+/** 设备诊断汇总：随数字孪生状态返回，含两侧问题列表、失败计数与熔断状态 */
+export interface DeviceDiagnostics {
+  status: 'healthy' | 'warning' | 'critical';
+  sensor: { status: string; issues: DeviceHealthIssue[]; offline_after_seconds: number };
+  actuator: {
+    status: string;
+    issues: DeviceHealthIssue[];
+    consecutive_failures: Record<string, number>;
+    circuits: Record<string, boolean>;
+    pending_ack_count: number;
+    ack_timeout_seconds: number;
+  };
+}
+
+/** 数字孪生运行状态（GET /api/digital-twin/status）：在线、场景、环境快照与诊断 */
+export interface DigitalTwinStatus {
+  online: boolean;
+  scenario: string | null;
+  scenario_name: string;
+  cycle?: number;
+  actuators: Record<string, string>;
+  environment?: Partial<Record<NumericSensorKey, number>>;
+  fault: Record<string, unknown> | null;
+  updated_at: string | null;
+  last_sensor_at: string | null;
+  sensor_age_seconds?: number | null;
+  diagnostics?: DeviceDiagnostics;
+  recent_acks?: ActuatorAck[];
+  actuator_state?: Record<string, string>;
+}
+
+/** 人工审批请求状态（pending/approved/rejected/resolved，兼容未知值） */
 export type HitlStatus = 'pending' | 'approved' | 'rejected' | 'resolved' | string;
 
 /** 人工审批请求（GET /api/hitl/pending） */
@@ -96,6 +159,8 @@ export interface HitlRequest {
   /** 需要人工回答的问题（可选） */
   question?: string;
   status: HitlStatus;
+  /** 批准决策后，基于最新传感器重新运行得到的结果 */
+  revalidation?: Decision;
 }
 
 /** 审计事件（GET /api/audit、GET /api/audit/history） */

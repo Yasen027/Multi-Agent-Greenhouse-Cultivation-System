@@ -13,14 +13,19 @@ import type {
   AuditEvent,
   DashboardSummary,
   Decision,
+  DigitalTwinStatus,
   HealthInfo,
   HitlRequest,
   SensorReading,
   Thresholds,
+  TwinScenario,
+  ActuatorCommand,
 } from '../types';
 
+// API 基础地址：读取 VITE_API_BASE 并去掉末尾斜杠；为空则走同源，由 Vite 代理转发到后端
 const API_BASE: string = (import.meta.env.VITE_API_BASE as string | undefined)?.replace(/\/+$/, '') ?? '';
 
+// 默认轮询间隔 4 秒；普通请求 10 秒超时，完整决策链耗时较长放宽到 120 秒
 export const POLL_INTERVAL_MS = 4000;
 const DEFAULT_TIMEOUT_MS = 10_000;
 const LONG_TIMEOUT_MS = 120_000;
@@ -53,6 +58,7 @@ export function describeError(err: unknown): string {
   return '发生未知错误，请稍后重试';
 }
 
+/** 把 HTTP 状态码与后端 detail 拼成面向用户的中文提示 */
 function httpStatusMessage(status: number, detail: string): string {
   const byStatus: Record<number, string> = {
     400: '请求参数不合法',
@@ -76,10 +82,12 @@ interface RequestOptions extends RequestInit {
   timeoutMs?: number;
 }
 
+/** 核心请求封装：fetch + 超时中止 + 外部取消转发 + JSON 解析，所有错误统一归一化为 ApiError */
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const { timeoutMs = DEFAULT_TIMEOUT_MS, headers, ...rest } = options;
   const url = `${API_BASE}${path}`;
 
+  // 统一 AbortController：超时与调用方取消触发同一个 abort，合并到一条 signal
   const controller = new AbortController();
   let timedOut = false;
   const onExternalAbort = () => controller.abort();
@@ -115,6 +123,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
       );
     }
 
+    // 先取响应文本再解析 JSON：解析失败按“接口版本不匹配”报错，而不是静默返回空数据
     let payload: unknown = null;
     const text = await res.text();
     if (text) {
@@ -125,6 +134,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
       }
     }
 
+    // 非 2xx 响应：优先提取 FastAPI 的 detail 字段拼进错误信息
     if (!res.ok) {
       const detail =
         typeof payload === 'object' && payload !== null && 'detail' in payload
@@ -134,6 +144,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     }
 
     return payload as T;
+    // 无论成功失败都清理定时器与外部 abort 监听，避免内存泄漏
   } finally {
     window.clearTimeout(timer);
     rest.signal?.removeEventListener('abort', onExternalAbort);
@@ -185,4 +196,18 @@ export const api = {
 
   /** GET /api/config/thresholds */
   getThresholds: () => request<Thresholds>('/api/config/thresholds'),
+
+  /** 数字孪生比赛场景与状态 */
+  getTwinScenarios: () => request<TwinScenario[]>('/api/digital-twin/scenarios'),
+  getTwinStatus: () => request<DigitalTwinStatus>('/api/digital-twin/status'),
+  selectTwinScenario: (scenario: string) =>
+    request<{ status: string; scenario: string }>('/api/digital-twin/scenario', {
+      method: 'POST',
+      body: JSON.stringify({ scenario }),
+    }),
+  sendActuatorCommand: (command: ActuatorCommand) =>
+    request<{ status: string; command: ActuatorCommand }>('/api/actuators/command', {
+      method: 'POST',
+      body: JSON.stringify(command),
+    }),
 };

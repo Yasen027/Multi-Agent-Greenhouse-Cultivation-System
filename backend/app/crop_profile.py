@@ -101,6 +101,7 @@ DEFAULT_PROFILES: Dict[str, Dict[str, Any]] = {
         "disease_risks": ["anthracnose", "gray_mold"],
     },
 }
+# 未知作物的兜底档案：范围更宽的通用阈值，保证任何作物都能继续自动控制。
 GENERIC_PROFILE = {
     "stage": "unknown",
     "temperature_min": 18,
@@ -119,6 +120,7 @@ GENERIC_PROFILE = {
     "disease_risks": [],
 }
 
+# 档案中按数值处理的阈值字段：归一化与分阶段展开都以这份清单为准。
 PROFILE_KEYS = (
     "temperature_min",
     "temperature_max",
@@ -135,6 +137,7 @@ PROFILE_KEYS = (
 )
 
 
+# 作物档案持久化路径：默认写到 config/crop_profiles.json，可用环境变量覆盖，并自动建目录。
 def _profile_path() -> Path:
     path = Path(
         os.getenv(
@@ -146,6 +149,7 @@ def _profile_path() -> Path:
     return path
 
 
+# 读取本地已保存的档案；文件缺失或损坏时返回空字典，不阻断启动。
 def _load_saved() -> Dict[str, Dict[str, Any]]:
     try:
         data = json.loads(_profile_path().read_text(encoding="utf-8"))
@@ -154,6 +158,7 @@ def _load_saved() -> Dict[str, Dict[str, Any]]:
         return {}
 
 
+# 将档案按作物名合并写回本地文件；写入失败只记录告警，不影响主流程。
 def _save_profile(profile: Dict[str, Any]) -> None:
     profiles = _load_saved()
     crop = profile.get("crop")
@@ -167,6 +172,7 @@ def _save_profile(profile: Dict[str, Any]) -> None:
         logger.warning("Could not persist crop profile: %s", exc)
 
 
+# 归一化作物的条件档案：合并 默认值→本地保存值→模型返回值，并展开分阶段阈值。
 def normalize_profile(
     crop: str, profile: Optional[Dict[str, Any]] = None, stage: str = "unknown"
 ) -> Dict[str, Any]:
@@ -175,6 +181,7 @@ def normalize_profile(
     base.update(_load_saved().get(crop_key, {}))
     incoming = dict(profile or {})
     stages = incoming.get("stages") if isinstance(incoming.get("stages"), dict) else {}
+    # 阶段选择回退链：模型返回阶段 → 调用方传入阶段 → 已保存档案阶段 → 默认档案阶段。
     selected_stage = incoming.get("stage")
     if not selected_stage or selected_stage == "unknown":
         default_stage = DEFAULT_PROFILES.get(crop_key, GENERIC_PROFILE).get(
@@ -206,6 +213,7 @@ def normalize_profile(
     base["crop"] = crop_key
     base["stage"] = selected_stage or "unknown"
     base["updated_at"] = incoming.get("updated_at") or datetime.utcnow().isoformat()
+    # 数值字段兜底：缺失或无法转 float 的阈值一律归零，防止下游比较出错。
     for key in PROFILE_KEYS:
         if key not in base:
             base[key] = 0.0
@@ -225,6 +233,7 @@ def analyze_crop_conditions(
     """请求 DeepSeek 生成档案，并与本地安全默认值合并。"""
     crop_key = str(crop or "unknown").lower().strip()
     fallback = normalize_profile(crop_key, stage=stage)
+    # 未收录的作物直接使用通用兜底档案，不请求模型。
     if crop_key not in DEFAULT_PROFILES:
         fallback["profile_source"] = "unknown_crop_fallback"
         return fallback
@@ -242,6 +251,7 @@ def analyze_crop_conditions(
             "weather", (context or {}).get("weather_json", {})
         ),
     }
+    # 模型调用失败（DeepSeekError）时回落到本地档案，保证决策不因模型故障中断。
     try:
         response = deepseek_client.complete_json(
             prompt_loader.load("crop_profile", variables)
@@ -255,6 +265,7 @@ def analyze_crop_conditions(
     return profile
 
 
+# 异步包装：在后台线程执行同步分析，避免阻塞事件循环。
 async def analyze_crop_conditions_async(
     crop: str, stage: str = "unknown", context: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:

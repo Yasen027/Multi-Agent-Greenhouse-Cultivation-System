@@ -1,6 +1,7 @@
 /** 人工审批页（HITL）：查看、批准、拒绝待处理请求（4 秒轮询） */
 
 import { useRef, useState } from 'react';
+import { Check, CheckCircle2, RefreshCw, X } from 'lucide-react';
 import { AlertBanner } from '../components/AlertBanner';
 import { EmptyState, Loading } from '../components/StatusViews';
 import { usePolling } from '../hooks/usePolling';
@@ -14,19 +15,33 @@ export function HITL() {
   const [feedback, setFeedback] = useState<{ kind: 'success' | 'error'; text: string } | null>(null);
   const feedbackTimer = useRef<number | null>(null);
 
+  // 操作反馈横幅：5 秒后自动消失，重复操作时重置计时器
   const showFeedback = (kind: 'success' | 'error', text: string) => {
     setFeedback({ kind, text });
     if (feedbackTimer.current !== null) window.clearTimeout(feedbackTimer.current);
     feedbackTimer.current = window.setTimeout(() => setFeedback(null), 5000);
   };
 
+  // 批准/拒绝请求：成功后乐观移除该项，并按重新校验后的下发状态生成反馈文案
   const act = async (item: HitlRequest, action: 'approve' | 'reject') => {
     setBusyId(item.id);
     try {
       const updated = action === 'approve' ? await api.approveHitl(item.id) : await api.rejectHitl(item.id);
       // 乐观更新：从待审批列表移除已处理项
       setData((prev) => (prev ?? []).filter((x) => x.id !== item.id));
-      showFeedback('success', `已${action === 'approve' ? '批准' : '拒绝'}请求 #${item.id.slice(0, 8)}（状态：${translateStatus(updated.status)}）`);
+      // 根据 revalidation 的分发状态，补充“已下发/仍拦截/下发失败”等结果说明
+      const dispatch = updated.revalidation?.dispatch?.status;
+      const approvalResult = dispatch === 'published' || dispatch === 'simulated_local'
+        ? '，已根据最新传感器重新决策并下发命令'
+        : dispatch === 'blocked_by_safety'
+          ? '，最新状态仍需人工复核，旧命令未执行'
+          : dispatch === 'dispatch_failed'
+            ? '，重新决策完成但命令下发失败'
+            : '';
+      const actionText = action === 'approve'
+        ? item.type === 'device_failure' ? '解除熔断并处理' : '批准'
+        : '拒绝';
+      showFeedback('success', `已${actionText}请求 #${item.id.slice(0, 8)}（状态：${translateStatus(updated.status)}）${approvalResult}`);
       void refresh();
     } catch (err) {
       showFeedback('error', describeError(err));
@@ -49,7 +64,7 @@ export function HITL() {
         </div>
         <div className="toolbar-actions">
           <button type="button" className="btn btn-ghost" onClick={refresh} disabled={refreshing}>
-            {refreshing ? '刷新中…' : '🔄 刷新'}
+            <RefreshCw size={16} aria-hidden /> {refreshing ? '刷新中…' : '刷新'}
           </button>
         </div>
       </div>
@@ -57,7 +72,7 @@ export function HITL() {
       {loading && !data ? (
         <Loading label="正在获取待审批请求…" />
       ) : pending.length === 0 ? (
-        <EmptyState icon="✅" title="暂无待审批请求" hint="当安全层拦截决策、作物识别置信度不足或执行器命令被阻断时，请求会出现在这里。" />
+        <EmptyState icon={<CheckCircle2 size={36} />} title="暂无待审批请求" hint="当安全层拦截决策、作物识别置信度不足或执行器命令被阻断时，请求会出现在这里。" />
       ) : (
         <ul className="hitl-list">
           {pending.map((item) => (
@@ -100,7 +115,7 @@ export function HITL() {
                   disabled={busyId !== null}
                   onClick={() => void act(item, 'approve')}
                 >
-                  {busyId === item.id ? '处理中…' : '✔ 批准'}
+                  <Check size={16} aria-hidden /> {busyId === item.id ? '处理中…' : item.type === 'device_failure' ? '解除熔断' : '批准'}
                 </button>
                 <button
                   type="button"
@@ -108,7 +123,7 @@ export function HITL() {
                   disabled={busyId !== null}
                   onClick={() => void act(item, 'reject')}
                 >
-                  {busyId === item.id ? '处理中…' : '✖ 拒绝'}
+                  <X size={16} aria-hidden /> {busyId === item.id ? '处理中…' : '拒绝'}
                 </button>
               </footer>
             </li>

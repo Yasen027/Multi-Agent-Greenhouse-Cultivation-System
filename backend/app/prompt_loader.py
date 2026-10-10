@@ -1,3 +1,4 @@
+# Prompt 模板加载器：从 prompts 目录读取 Markdown 模板并做变量替换。
 import json
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -10,6 +11,7 @@ class PromptLoader:
         if root:
             self.root = Path(root)
         else:
+            # 模板目录候选顺序：backend/prompts 优先，其次 app/prompts；均不存在时回退到第一个候选。
             candidates = [
                 Path(__file__).parents[1] / "prompts",
                 Path(__file__).parent / "prompts",
@@ -19,6 +21,7 @@ class PromptLoader:
             )
 
     def load(self, name: str, variables: Optional[Dict[str, Any]] = None) -> str:
+        # 读取指定模板；文件缺失时使用兜底文本，保证总能返回可用提示词。
         path = self.root / (name + ".md")
         text = (
             path.read_text(encoding="utf-8")
@@ -26,6 +29,7 @@ class PromptLoader:
             else "Return valid structured JSON."
         )
         values = variables or {}
+        # 显式传入的变量：字典/列表用 JSON 序列化，标量直接转字符串后替换。
         for key, value in values.items():
             rendered = (
                 json.dumps(value, ensure_ascii=False, default=str)
@@ -54,4 +58,5 @@ class PromptLoader:
         return text
 
 
+# 进程级单例，供各决策服务复用。
 prompt_loader = PromptLoader()

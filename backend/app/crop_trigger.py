@@ -1,9 +1,11 @@
+# 作物识别触发策略：管理周期识别、手动/换季/换作物等触发原因与触发状态。
 from datetime import datetime, timedelta
 
 
 class CropTriggerManager:
     """管理作物识别的周期触发、手动触发和换季触发。"""
 
+    # interval_hours=168 即 7 天：默认每周到期后重新识别一次作物。
     def __init__(self, interval_hours=168):
         self.interval_hours = interval_hours
         self.last_run = None
@@ -19,6 +21,7 @@ class CropTriggerManager:
 
     def should_run(self, reason=None, force=False, mismatch=False):
         """根据触发原因决定是否立即执行识别。"""
+        # 触发白名单：启动、换季、换作物三种原因立即识别；其余原因按周期到期判断。
         return (
             force
             or mismatch
@@ -43,4 +46,5 @@ class CropTriggerManager:
         }
 
 
+# 模块级单例：全局共享同一份识别周期状态。
 manager = CropTriggerManager()

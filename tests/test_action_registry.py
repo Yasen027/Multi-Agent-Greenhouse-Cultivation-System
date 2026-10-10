@@ -14,6 +14,7 @@ from backend.app.agents.decision_agent import decision_agent
 from backend.app.main import app
 from backend.app.schemas import SensorReading
 from backend.app.tools.actuator_dispatch import dispatch_commands
+from backend.app.services import safety
 
 
 def test_all_agent_recommendations_are_registered_and_structured():
@@ -115,6 +116,17 @@ def test_manual_commands_use_registry_and_shared_safety_gate():
     assert pesticide.json()["status"] == "need_hitl"
     assert pesticide.json()["alerts"][0]["recommendation"] == "pesticide_on"
     assert unknown.json()["code"] == "unknown_recommendation"
+
+
+def test_all_human_approval_reasons_are_chinese():
+    messages = [
+        spec.message
+        for spec in ACTION_REGISTRY.values()
+        if spec.requires_hitl
+    ]
+    messages.extend(safety(SensorReading(temperature=41, ph=9), [])[1])
+    assert messages
+    assert all(any("\u4e00" <= char <= "\u9fff" for char in message) for message in messages)
 
 
 def _async_value(value):

@@ -2,37 +2,44 @@
 
 import type { AgentStatus } from '../types';
 import { translateFinding, translateRecommendation } from '../utils/i18n';
+import { Bot, Bug, Droplets, Lightbulb, ScanSearch, Sprout, Thermometer, Waves, type LucideIcon } from 'lucide-react';
 
+// 风险等级 → 中文文案（未知等级回退为原始英文）
 const RISK_TEXT: Record<string, string> = {
   low: '低风险',
   medium: '中风险',
   high: '高风险',
 };
 
-const AGENT_META: Record<string, { label: string; icon: string }> = {
-  soil: { label: '土壤专家', icon: '🪴' },
-  temperature: { label: '温度专家', icon: '🌡️' },
-  humidity: { label: '湿度专家', icon: '💧' },
-  pest: { label: '病虫害专家', icon: '🐛' },
-  irrigation: { label: '灌溉专家', icon: '🚿' },
-  light_co2: { label: '光照/CO₂ 专家', icon: '☀️' },
-  crop_stage: { label: '生育期专家', icon: '🌾' },
-  crop_identification: { label: '作物识别', icon: '🔍' },
+// 智能体 key → 中文名与图标；未知 key 回退到 Bot 图标并直接展示原始 id
+const AGENT_META: Record<string, { label: string; icon: LucideIcon }> = {
+  soil: { label: '土壤专家', icon: Sprout },
+  temperature: { label: '温度专家', icon: Thermometer },
+  humidity: { label: '湿度专家', icon: Droplets },
+  pest: { label: '病虫害专家', icon: Bug },
+  irrigation: { label: '灌溉专家', icon: Waves },
+  light_co2: { label: '光照/CO₂ 专家', icon: Lightbulb },
+  crop_stage: { label: '生育期专家', icon: Sprout },
+  crop_identification: { label: '作物识别', icon: ScanSearch },
 };
 
 export function AgentCard({ agent }: { agent: AgentStatus }) {
-  const meta = AGENT_META[agent.agent] ?? { label: agent.agent, icon: '🤖' };
+  // 未知智能体兜底：展示原始 id 与通用机器人图标
+  const meta = AGENT_META[agent.agent] ?? { label: agent.agent, icon: Bot };
+  const AgentIcon = meta.icon;
   const statusOk = agent.status === 'ok';
+  // 状态文案：ok → 正常，idle → 待命，其余状态原样显示
   const statusText = statusOk ? '正常' : agent.status === 'idle' ? '待命' : agent.status || '待命';
   const risk = agent.risk_level ? (RISK_TEXT[agent.risk_level] ?? agent.risk_level) : '—';
   const riskClass = agent.risk_level ? `risk-${String(agent.risk_level).toLowerCase()}` : '';
+  // 置信度夹在 0–1 后转百分比并取整，防御缺失值、NaN 与越界
   const confidencePct = Math.round(Math.min(1, Math.max(0, Number(agent.confidence) || 0)) * 100);
 
   return (
     <article className="card agent-card">
       <header className="agent-head">
         <span className="agent-icon" aria-hidden="true">
-          {meta.icon}
+          <AgentIcon size={20} aria-hidden />
         </span>
         <div className="agent-title">
           <p className="agent-name">{meta.label}</p>

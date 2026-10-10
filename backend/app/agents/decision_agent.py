@@ -15,6 +15,7 @@ class DecisionFusionAgent:
     def fuse(self, outputs, context=None):
         context = context or {}
         profile = context.get("crop_profile") or {}
+        # 每次融合前重置本轮的告警与需人工介入动作列表。
         self.last_alerts = []
         self.last_hitl_actions = []
 
@@ -49,6 +50,7 @@ class DecisionFusionAgent:
                     reason=agent.get("agent", "agent"),
                 )
                 command_data = (
+                    # 兼容 Pydantic v1/v2 的序列化方式，统一转成字典。
                     command.model_dump()
                     if hasattr(command, "model_dump")
                     else command.dict()
