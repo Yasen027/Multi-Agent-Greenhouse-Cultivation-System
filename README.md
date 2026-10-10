@@ -1,478 +1,347 @@
-# 🌱 温室多智能体栽培系统
+# 温室多智能体栽培系统
 
-> **Multi-Agent Greenhouse Cultivation System**：一个面向温室环境的多智能体决策闭环。系统接收传感器读数和可选作物图像，由多个领域 Agent 并行分析，再经过动作注册表、决策融合、安全门和 HITL（Human-in-the-Loop）审核，最后在满足安全条件时通过 MQTT 发布执行器命令。
+一个面向比赛演示、教学和原型验证的温室控制闭环：接收环境读数，由多个领域 Agent 并行分析，统一融合为执行器命令，再经过安全门、设备健康诊断和 HITL（Human-in-the-Loop）审批，最终驱动 MQTT 或进程内数字孪生。
 
-当前后端版本：`0.2.0` · FastAPI · Python · React · TypeScript · Vite · MQTT 数字孪生
+> 当前版本：`0.2.0`。仓库已经具备可运行的前后端、数字孪生、故障注入、审计和离线 Docker 启动流程；它不是可直接接入真实温室的生产控制系统。
 
-## 项目定位
+## 项目亮点
 
-本项目是一个可离线运行的温室控制原型，重点验证以下链路：
+- **完整控制闭环**：传感器 → Agent 分析 → 决策融合 → 安全检查 → 命令下发 → ACK → 下一周期环境变化。
+- **多智能体协作**：土壤、温度、湿度、病虫害、灌溉、光照/CO₂ 和生育期 Agent 并行运行。
+- **安全优先**：极端温度、异常 pH、低置信度、未知动作、危险动作、设备冲突和传感器故障都会阻止自动下发。
+- **人工审批**：危险决策不会保存旧命令等待重放；审批通过后会使用最新读数重新决策并再次校验。
+- **可解释数字孪生**：内置正常、极端环境、传感器故障和执行器故障场景，命令会直接影响下一周期环境。
+- **离线比赛部署**：可提前打包 Docker 镜像，在断网电脑上校验镜像并一键启动。
+- **可选 DeepSeek**：只用于作物识别和作物档案生成；未配置密钥时自动使用本地规则与保守档案。
 
-```text
-传感器读数
-    → 作物识别 / 作物档案
-    → 多智能体并行分析
-    → recommendation 动作注册与融合
-    → 安全门 / 低置信度 / 设备互斥检查
-    → MQTT dispatch 或 HITL
-    → 审计、看板和前端展示
-```
-
-系统默认使用本地规则和本地作物档案；即使不配置 DeepSeek 或 MQTT Broker，也会自动启用进程内数字孪生，完成识别回退、决策分析、安全拦截和环境闭环。
-
-## 主要能力
-
-- 传感器接入：温度、湿度、土壤湿度、pH、EC、光照、CO₂ 和可选图像 URL。
-- 作物识别：支持番茄、生菜、草莓、黄瓜和辣椒；支持视觉模型、元数据关键词和本地回退。
-- 作物档案：基于本地保守默认值，可选调用 DeepSeek 生成并持久化档案。
-- 多智能体分析：土壤、温度、湿度、灌溉、光照/CO₂、生长阶段、病虫害和作物识别。
-- 可复用决策服务：`decision_service.py` 将识别、调度、融合、安全、HITL、dispatch 和审计集中为一次完整运行，可被 API、传感器触发和其他任务复用。
-- 动作注册表：`action_registry.py` 为 recommendation 登记执行器、动作、风险等级和 HITL 要求，未知 recommendation 变成结构化告警，不再静默丢弃。
-- 安全控制：高温、越界 pH、低置信度、高风险动作、未知动作、农药动作以及 `heating + ventilation` 互斥组合都会阻断自动下发。
-- MQTT dispatch：安全通过后发布到 `greenhouse/actuators/commands`；未配置 Broker 时安全返回 `skipped_no_broker`。
-- HITL 审批：提供待审批、批准、拒绝接口，并把操作写入审计。
-- React 控制台：总览、智能体、人工审批、历史审计和温室地图五个页面，默认每 4 秒轮询后端。
-- SQLite 审计：运行时状态保存在内存，审计事件同时尝试写入 `greenhouse.db`。
-
-## 系统架构
+## 实际运行链路
 
 ```mermaid
 flowchart LR
-    SENSOR[传感器 / edge HTTP 模拟器]
-    IMAGE[作物图像 URL]
-
-    subgraph API[FastAPI 后端]
-        INGEST[Sensor API]
-        SERVICE[DecisionService]
-        IDENTIFY[作物识别与档案]
-        ORCH[Orchestrator]
-        AGENTS[专家 Agents]
-        REGISTRY[Action Registry]
-        FUSION[Decision Fusion]
-        SAFETY[安全门 + HITL]
-        AUDIT[审计与状态]
-    end
-
-    MQTT[MQTT Broker]
-    EDGE[edge subscriber / command handler]
-    UI[React 控制台]
-
-    SENSOR --> INGEST
-    IMAGE --> SERVICE
-    INGEST --> SERVICE
-    SERVICE --> IDENTIFY --> ORCH --> AGENTS --> REGISTRY --> FUSION --> SAFETY
-    SAFETY -->|允许| MQTT --> EDGE
-    SAFETY -->|阻断| UI
-    SERVICE --> AUDIT
-    UI -->|REST 轮询| API
+    SENSOR[HTTP / MQTT 传感器] --> API[FastAPI]
+    API --> PROFILE[作物识别与档案]
+    PROFILE --> AGENTS[领域 Agents 并行分析]
+    AGENTS --> FUSION[动作注册与决策融合]
+    FUSION --> SAFE[安全门与设备诊断]
+    SAFE -->|通过| DISPATCH[MQTT / 本地孪生命令]
+    SAFE -->|阻断| HITL[人工审批]
+    HITL -->|批准| RECHECK[按最新读数重新决策]
+    RECHECK --> SAFE
+    DISPATCH --> TWIN[数字孪生 / 边缘执行器]
+    TWIN -->|ACK 与新读数| API
+    API --> UI[React 控制台]
+    API --> AUDIT[内存状态与 SQLite 审计]
 ```
 
-### 一次决策的实际执行顺序
+系统有两种执行方式：
 
-`POST /api/agents/run` 只负责调用 `DecisionService.run()`，服务内部按以下顺序执行：
-
-1. 如果当前作物档案不存在、置信度低于 `0.7` 且有图像，先运行作物识别。
-2. 识别成功后生成或加载作物条件档案；低置信度或未知作物会创建 HITL 请求。
-3. Orchestrator 并行运行专家 Agent，得到统一的 `{agent, confidence, findings, recommendations, risk_level}` 结果。
-4. `DecisionFusionAgent` 根据 `action_registry.py` 将 recommendation 分类为执行命令、告警或 HITL 动作。
-5. 安全层检查温度、pH、农药、低置信度、未知 recommendation、执行器白名单和设备互斥规则。
-6. 只有通过安全门的命令才会调用 MQTT dispatch；否则写入 `state.hitl` 并返回结构化原因。
-7. 决策、动作告警、Agent 输出、dispatch 状态和 HITL 事件写入内存状态与审计。
-
-## 技术栈
-
-| 层 | 技术 |
+| 启动方式 | 控制链路 |
 | --- | --- |
-| 后端 | Python 3.11、FastAPI、Uvicorn、Pydantic |
-| Agent | asyncio 并发、规则型 specialist、统一决策服务 |
-| 可选模型 | DeepSeek OpenAI-compatible API |
-| 执行通信 | paho-mqtt、MQTT JSON 命令 |
-| 数据 | 进程内状态 + SQLite 审计 |
-| 前端 | React 19、TypeScript 5.9、Vite 8 |
-| 测试 | pytest、FastAPI TestClient |
-| 部署 | Docker Compose 或本地 Python/Node 环境 |
+| Docker Compose | Mosquitto + API + 独立数字孪生 + 前端，使用真实 MQTT 消息和 ACK |
+| 本地后端且未配置 `MQTT_BROKER` | 命令由进程内数字孪生执行，返回 `simulated_local`；选择场景后开始每 2 秒推进环境 |
+
+所有专家 Agent 当前以确定性本地规则为主。Prompt 会被加载用于上下文记录，但尚未把每个专家 Agent 都交给大模型推理。
 
 ## 快速开始
 
-### 方式一：Docker Compose
+### 方式一：Docker Compose（推荐）
 
-要求：Docker Desktop 或 Docker Engine + Compose。
+要求：Docker Desktop 或 Docker Engine，并支持 `docker compose`。
 
-首次联网构建：
-
-```bash
+```powershell
 docker compose up --build --wait
 ```
 
-比赛现场离线启动时，双击 `start-offline.cmd`。该脚本只加载赛前准备好的镜像包，禁止拉取和重新构建，不会运行 `pip install`、`npm install` 或 `pnpm install`。
+启动后访问：
 
-服务地址：
+- 控制台：<http://localhost:5173>
+- API：<http://localhost:8000>
+- Swagger：<http://localhost:8000/docs>
+- 健康检查：<http://localhost:8000/api/health>
 
-- 后端 API：<http://localhost:8000>
-- Swagger 文档：<http://localhost:8000/docs>
-- 前端控制台：<http://localhost:5173>
+Compose 会启动四个服务：`mosquitto`、`api`、`digital-twin` 和 `frontend`。所有宿主机端口都只绑定到 `127.0.0.1`。
 
-Compose 会同时启动 Mosquitto、数字孪生、API 和前端，并等待各容器健康检查通过。打开首页即可选择比赛场景，观察“传感器 → 多智能体 → 控制命令/ACK → 下一周期环境”的实时闭环。
-
-赛前联网生成离线镜像包：
+停止服务：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/package_offline.ps1
+docker compose down
 ```
 
-生成的 `deploy/offline/greenhouse-images.tar` 和 SHA-256 校验文件不会提交 Git，应与整个项目目录一起复制到比赛电脑。完整冷启动验收和录屏清单见 [docs/competition/offline-acceptance.md](docs/competition/offline-acceptance.md)。
+### 方式二：本地开发
 
-内置比赛场景包括：正常生产、高温干旱、低温寒潮、弱光低 CO₂、风机故障、灌溉无响应、传感器固定值、异常值和数据超时。首页也可手工开关风机、灌溉、加热、补光灯和 CO₂，验证对应因果变化。
+要求：Python 3.11、Node.js `>=22.13.0`、Corepack。
 
-### 方式二：本地启动后端
+在项目根目录安装并启动后端：
 
-Python 建议使用 3.11。
-
-```bash
+```powershell
 python -m venv .venv
-
-# 在项目根目录Windows PowerShell
-
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
 .\.venv\Scripts\python.exe -m uvicorn backend.app.main:app --reload --host 0.0.0.0 --port 8000
-
-# macOS / Linux
-# source .venv/bin/activate
-
-pip install -r requirements.txt
-uvicorn backend.app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-验证健康状态：
+另开一个 PowerShell 窗口启动前端：
 
-```bash
-curl http://localhost:8000/api/health
-```
-
-预期返回：
-
-```json
-{"status":"ok","version":"0.2.0"}
-```
-
-### 本地启动前端
-
-要求：Node.js `>=22.13.0`。前端开发服务器会把 `/api` 和 `/ws` 代理到 `localhost:8000`。
-
-```bash
+```powershell
 cd frontend
 corepack enable
 pnpm install --frozen-lockfile
 pnpm run dev
 ```
 
-常用命令：
+Vite 会把 `/api` 和 `/ws` 代理到 `http://localhost:8000`。
 
-```bash
-pnpm run typecheck
-pnpm run build
-pnpm run preview
+## 五分钟演示
+
+### 图形界面演示
+
+1. 打开 <http://localhost:5173>。
+2. 在“种植总栏”选择“正常生产”，观察环境数据、Agent 时间线和执行器状态。
+3. 切换“高温干旱”，运行一轮决策，观察通风、灌溉命令及 ACK。
+4. 切换“风机故障”或“灌溉无响应”，观察连续失败、ACK 超时、熔断和人工审批。
+5. 切换“传感器固定值”“传感器异常值”或“传感器超时”，观察设备诊断与安全拦截。
+6. 在“人工审批”和“历史审计”页面验证审批后重新决策及事件留痕。
+
+内置场景如下：
+
+| 场景 ID | 页面名称 | 演示内容 |
+| --- | --- | --- |
+| `normal` | 正常生产 | 常规闭环 |
+| `hot_dry` | 高温干旱 | 通风与灌溉 |
+| `cold_snap` | 低温寒潮 | 加热 |
+| `low_light_co2` | 弱光低 CO₂ | 补光与补气 |
+| `actuator_failed` | 风机故障 | failed ACK、失败累计与熔断 |
+| `actuator_timeout` | 灌溉无响应 | ACK 超时与故障诊断 |
+| `sensor_stuck` | 传感器固定值 | 连续相同读数诊断 |
+| `sensor_abnormal` | 传感器异常值 | Pydantic 范围校验与异常审计 |
+| `sensor_timeout` | 传感器超时 | 离线诊断 |
+
+### API 演示：正常 → 危险 → HITL → 审计
+
+启动后端后，在另一个 PowerShell 窗口执行：
+
+```powershell
+$normal = @{
+    device_id = "demo-1"
+    temperature = 25
+    humidity = 68
+    soil_moisture = 45
+    ph = 6.2
+    ec = 1.8
+    light = 650
+    co2 = 700
+} | ConvertTo-Json
+
+Invoke-RestMethod -Method Post -Uri http://localhost:8000/api/sensors/readings `
+    -ContentType application/json -Body $normal
+Invoke-RestMethod -Method Post -Uri http://localhost:8000/api/agents/run
+
+$danger = $normal | ConvertFrom-Json
+$danger.temperature = 45
+$danger = $danger | ConvertTo-Json
+Invoke-RestMethod -Method Post -Uri http://localhost:8000/api/sensors/readings `
+    -ContentType application/json -Body $danger
+Invoke-RestMethod -Method Post -Uri http://localhost:8000/api/agents/run
+
+Invoke-RestMethod http://localhost:8000/api/hitl/pending
+Invoke-RestMethod 'http://localhost:8000/api/audit/history?limit=20'
 ```
 
-### 运行模拟数据
+45℃ 超过代码中的 40℃ 安全红线，决策的 `dispatch.status` 应为 `blocked_by_safety`，并在 `/api/hitl/pending` 中生成待审批项。
 
-启动后端后，在项目根目录运行：
+仓库还提供一个简化脚本：
 
-```bash
-python scripts/run_simulation.py
+```powershell
+.\.venv\Scripts\python.exe scripts\run_simulation.py
 ```
 
-该脚本会发送三轮高温、较高湿度和土壤偏干数据，并请求决策接口。也可以运行持续传感器模拟器：
+该脚本会连续上报三组相同的 35℃ 数据，随后上报 45℃ 数据；除高温拦截外，连续相同读数也可能触发传感器固定值诊断。
 
-```bash
-python edge/mqtt/publisher.py
+## 决策与安全机制
+
+### Agent 与融合
+
+`backend/app/decision_service.py` 是统一决策入口。API 触发、MQTT 传感器触发和 HITL 复核都复用同一流程：
+
+1. 必要时识别作物并生成作物档案。
+2. 并行运行领域 Agent。
+3. 将 recommendation 通过 `action_registry.py` 映射为命令、告警或人工审批动作。
+4. 检查安全红线、Agent 置信度、未知动作、执行器白名单、设备冲突和传感器健康。
+5. 安全通过后下发命令；否则创建去重的 HITL 事件。
+6. 保存决策、Agent 输出、分发结果和审计事件。
+
+可自动控制的执行器为：
+
+```text
+ventilation  irrigation  heating  mister
+grow_light   shade       co2      fan
 ```
 
-注意：文件名虽然叫 `mqtt/publisher.py`，当前实现实际通过 HTTP `POST /api/sensors/readings` 上报随机读数；它不是传感器 MQTT 输入适配器。
+`adjust_ph`、人工复核类建议、CO₂ 富集复核和 `pesticide_on` 不会直接自动执行；未知 recommendation 也不会被静默丢弃。
 
-正式的数字孪生入口是：
+### 当前硬安全规则
 
-```bash
-python -m digital_twin.main
+- 温度大于 `40℃`。
+- pH 小于 `4` 或大于 `8`。
+- 出现化学农药命令。
+- 除作物识别和生育期外，任一专家 Agent 置信度低于 `0.7`。
+- 同一批命令同时开启 `heating` 和 `ventilation`。
+- recommendation 或执行器未注册。
+- 传感器固定值、离线或越界。
+- 执行器连续失败达到阈值并进入熔断。
+
+默认设备诊断阈值：传感器连续 `3` 次相同判定疑似卡死，`6` 秒无有效读数判定离线，ACK 等待 `5` 秒超时，执行器连续失败 `3` 次后熔断。均可通过环境变量覆盖。
+
+## 作物识别
+
+系统支持以下本地作物档案：
+
+```text
+tomato  lettuce  strawberry  cucumber  pepper
 ```
 
-本地单独运行且未配置 MQTT Broker 时会自动使用进程内数字孪生；使用 `docker compose up` 时则通过 Mosquitto 运行完整 MQTT 链路。
+识别顺序为：
+
+1. 配置 DeepSeek 时，调用 OpenAI-compatible `/chat/completions`。
+2. 模型不可用时，从图像 URL、元数据和人工输入中匹配中英文关键词。
+3. 仍无法识别时返回 `unknown` 和低置信度，进入人工确认。
+
+作物档案默认写入 `config/crop_profiles.json`。仓库内的 `config/settings.yaml` 和 `config/safety_rules.yaml` 目前主要是规划/默认值参考，并未全部接入运行时；安全结果应以源码和测试为准。
 
 ## API 概览
 
-完整接口以运行中的 Swagger 为准：<http://localhost:8000/docs>。
-
-### 健康、传感器和看板
+完整参数和响应模型请查看运行中的 Swagger。
 
 | 方法 | 路径 | 作用 |
 | --- | --- | --- |
-| `GET` | `/api/health` | 健康检查和版本 |
-| `POST` | `/api/sensors/readings` | 写入最新传感器读数、历史和审计 |
-| `GET` | `/api/sensors/latest` | 获取最新传感器读数 |
-| `GET` | `/api/dashboard/summary` | 获取传感器、最新决策、Agent 数和待审批数 |
-| `GET` | `/api/audit` | 获取全部内存审计事件 |
-| `GET` | `/api/audit/history?limit=100` | 获取最近审计事件 |
-| `GET` | `/api/config/thresholds` | 获取当前展示用阈值 |
-| `GET` | `/api/digital-twin/scenarios` | 获取内置比赛场景 |
-| `POST` | `/api/digital-twin/scenario` | 通过 MQTT 切换比赛场景 |
-| `GET` | `/api/digital-twin/status` | 获取孪生状态、最近 ACK 和设备诊断结果 |
+| `GET` | `/api/health` | API 健康与版本 |
+| `POST` | `/api/sensors/readings` | 写入传感器读数 |
+| `GET` | `/api/sensors/latest` | 查询最新读数 |
+| `POST` | `/api/agents/run` | 运行完整决策链 |
+| `GET` | `/api/agents/status` | 查询最近 Agent 输出 |
+| `GET` | `/api/decisions` | 查询内存中的决策历史 |
+| `GET` | `/api/hitl/pending` | 查询待审批项 |
+| `POST` | `/api/hitl/{id}/approve` | 批准并按最新状态复核 |
+| `POST` | `/api/hitl/{id}/reject` | 拒绝审批项 |
+| `POST` | `/api/actuators/command` | 经注册表和安全门发送手工命令 |
+| `GET` | `/api/dashboard/summary` | 前端总览快照 |
+| `GET` | `/api/audit/history?limit=100` | 查询最近审计事件 |
+| `GET` | `/api/digital-twin/scenarios` | 查询孪生场景 |
+| `POST` | `/api/digital-twin/scenario` | 切换孪生场景 |
+| `GET` | `/api/digital-twin/status` | 查询孪生、ACK 和设备诊断 |
+| `WS` | `/ws/updates` | 发送一次状态快照 |
 
-传感器读数示例：
+前端当前每 4 秒轮询 REST API；WebSocket 端点只发送一次快照，不是持续推送通道。
 
-```bash
-curl -X POST http://localhost:8000/api/sensors/readings \
-  -H "Content-Type: application/json" \
-  -d '{
-    "device_id": "simulator-1",
-    "temperature": 32,
-    "humidity": 78,
-    "soil_moisture": 22,
-    "ph": 6.2,
-    "ec": 1.5,
-    "light": 500,
-    "co2": 700
-  }'
-```
-
-### 决策和 Agent
-
-| 方法 | 路径 | 作用 |
-| --- | --- | --- |
-| `POST` | `/api/agents/run` | 运行一轮完整决策服务 |
-| `GET` | `/api/agents/status` | 查看最近一次 Agent 结果 |
-| `GET` | `/api/decisions` | 查看决策列表 |
-| `GET` | `/api/decisions/latest` | 查看最新决策 |
-
-`POST /api/agents/run` 返回的核心字段：
-
-```json
-{
-  "id": "decision-id",
-  "priority_actions": [
-    {"actuator": "irrigation", "action": "on", "value": null, "reason": "soil"}
-  ],
-  "human_intervention": false,
-  "explanation_for_farmer": "Routine environmental optimization",
-  "dispatch": {"status": "skipped_no_broker", "count": 1},
-  "action_alerts": [],
-  "audit": {"agents": []}
-}
-```
-
-`dispatch.status` 常见值：
-
-- `published`：已发布到 MQTT。
-- `simulated_local`：未配置 Broker，命令已由进程内数字孪生执行。
-- `skipped_no_broker`：旧版兼容状态，表示未配置 Broker 且跳过发布。
-- `blocked_by_safety`：被安全门或 HITL 阻断。
-- `blocked_unsafe_actuator`：执行器不在白名单中。
-- `dispatch_failed`：MQTT 发布过程中发生异常。
-- `nothing_to_dispatch`：本轮没有可执行命令。
-
-### 作物识别与档案
-
-| 方法 | 路径 | 作用 |
-| --- | --- | --- |
-| `POST` | `/api/agents/crop-identification` | 单次识别图像/元数据 |
-| `POST` | `/api/agents/crop-identification/run` | 按启动、换季、换作物、周期等策略触发识别 |
-| `POST` | `/api/agents/crop-identification/analyze` | 生成或分析作物条件档案 |
-| `POST` | `/api/agents/crop-identification/confirm` | 人工确认作物并完成档案更新 |
-| `GET` | `/api/agents/crop-identification/status` | 查看识别、档案和触发器状态 |
-
-### HITL 和手工执行器命令
-
-| 方法 | 路径 | 作用 |
-| --- | --- | --- |
-| `GET` | `/api/hitl/pending` | 查看待审批项 |
-| `POST` | `/api/hitl/{id}/approve` | 批准一项 HITL 请求 |
-| `POST` | `/api/hitl/{id}/reject` | 拒绝一项 HITL 请求 |
-| `POST` | `/api/actuators/command` | 提交手工执行器命令，仍经过动作注册和安全门 |
-| `WS` | `/ws/updates` | 返回一次状态快照；当前前端仍使用轮询 |
-
-HITL 批准会使用最新传感器重新运行完整决策与安全检查：安全结果未变化时消费本次授权并下发新生成的命令，风险或命令变化时不执行旧命令，而是生成新的待审批请求；拒绝操作只更新状态并写入审计。
-
-## 动作注册表与安全策略
-
-动作定义集中在 [backend/app/action_registry.py](backend/app/action_registry.py)。每项动作包含：
-
-- `recommendation`：Agent 输出的建议名称。
-- `actuator` / `action`：可执行时对应的执行器和动作。
-- `risk_level`：风险等级。
-- `requires_hitl`：是否必须人工审批。
-- `kind`：`command`、`alert` 或 `hitl`。
-
-主要执行器白名单：
-
-```text
-ventilation · irrigation · heating · mister
-grow_light · shade · co2 · fan
-```
-
-以下动作不会自动执行：
-
-| recommendation | 处理方式 |
-| --- | --- |
-| `adjust_ph` | 高风险，进入 HITL |
-| `human_review_soil` | 进入 HITL |
-| `human_review_temperature` | 进入 HITL |
-| `human_review_irrigation` | 进入 HITL |
-| `co2_enrichment_review` | 进入 HITL |
-| `request_human_confirmation` | 进入 HITL |
-| `drainage_check` | 结构化告警 |
-| `notify_pest_agent` | 结构化告警 |
-| `update_stage_thresholds` | 结构化告警 |
-| 未注册 recommendation | 结构化未知动作告警并阻断 |
-| `pesticide_on` | critical 风险，始终 HITL，且不在自动执行器白名单中 |
-
-设备互斥规则当前至少包括：`heating_on` 和 `ventilation_on` 不允许同时自动开启。安全门还会拦截：
-
-- 温度大于 `40` ℃。
-- pH 小于 `4` 或大于 `8`。
-- 任意农药命令。
-- specialist 置信度低于 `0.7`（作物识别和生长阶段有专门例外逻辑）。
-- 作物识别需要人工确认。
-- 未注册动作、未知执行器和不满足设备互斥规则的命令。
-
-## 配置
-
-### 环境变量
+## 常用环境变量
 
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
-| `DEEPSEEK_API_KEY` | 空 | 不设置时使用本地识别/档案回退 |
-| `DEEPSEEK_BASE_URL` | `https://api.deepseek.com/v1` | DeepSeek OpenAI-compatible API 地址 |
+| `DEEPSEEK_API_KEY` | 空 | 为空时使用本地回退 |
+| `DEEPSEEK_BASE_URL` | `https://api.deepseek.com/v1` | OpenAI-compatible 地址 |
 | `DEEPSEEK_MODEL` | `deepseek-chat` | 文本模型 |
-| `DEEPSEEK_VISION_MODEL` | 与文本模型相同 | 图像识别模型 |
+| `DEEPSEEK_VISION_MODEL` | 同文本模型 | 图像模型 |
 | `DEEPSEEK_TIMEOUT` | `30` | 请求超时秒数 |
-| `DEEPSEEK_RETRIES` | `2` | 重试次数 |
-| `MQTT_BROKER` | 空 | Broker 主机；Compose 内固定为 `mosquitto` |
+| `DEEPSEEK_RETRIES` | `2` | 失败重试次数 |
+| `MQTT_BROKER` | 空 | API 未配置时使用进程内孪生 |
 | `MQTT_PORT` | `1883` | Broker 端口 |
+| `MQTT_SENSOR_TOPIC` | `greenhouse/sensors/+` | API 订阅的传感器主题 |
 | `MQTT_ACTUATOR_TOPIC` | `greenhouse/actuators/commands` | 执行器命令主题 |
-| `MQTT_ACK_TOPIC` | `greenhouse/actuators/ack` | 执行结果 ACK 主题 |
-| `MQTT_TWIN_SCENARIO_TOPIC` | `greenhouse/digital-twin/scenario` | 比赛场景切换主题 |
-| `TWIN_INTERVAL_SECONDS` | `2` | 数字孪生推进周期（秒） |
-| `SENSOR_STUCK_COUNT` | `3` | 单个传感器字段连续相同多少次后判定疑似卡死 |
-| `SENSOR_OFFLINE_SECONDS` | `6` | 无有效传感器读数多久后判定离线 |
-| `ACK_TIMEOUT_SECONDS` | `5` | 每条执行器命令等待 ACK 的截止时间 |
-| `ACTUATOR_FAILURE_LIMIT` | `3` | 单执行器连续失败多少次后熔断并创建 HITL |
-| `CROP_PROFILE_PATH` | `config/crop_profiles.json` | 作物档案存储路径 |
-| `VITE_API_BASE` | 空 | 前端生产环境 API 基地址 |
-
-仓库中的 `config/settings.yaml`、`config/safety_rules.yaml` 和其他 YAML 文件用于保存规划配置或默认值；当前部分运行参数仍直接从环境变量和代码读取，不能把所有 YAML 字段视为已接入的动态配置。
-
-## MQTT 与边缘端
-
-后端安全通过后，将每条命令作为 JSON 发布到：
-
-```text
-greenhouse/actuators/commands
-```
-
-边缘端入口：
-
-- `edge/mqtt/subscriber.py`：连接 MQTT 并订阅命令。
-- `edge/mqtt/command_handler.py`：校验执行器白名单并调用可注入 handler。
-
-默认 edge handler 只记录命令，不直接操作真实硬件；仓库不包含真实设备驱动。接入硬件前必须增加物理急停、断电保护、权限控制和设备级限位。
+| `MQTT_ACK_TOPIC` | `greenhouse/actuators/ack` | ACK 主题 |
+| `MQTT_TWIN_SCENARIO_TOPIC` | `greenhouse/digital-twin/scenario` | 场景切换主题 |
+| `MQTT_TWIN_STATUS_TOPIC` | `greenhouse/digital-twin/status` | 孪生状态主题 |
+| `TWIN_INTERVAL_SECONDS` | `2` | 独立孪生推进周期 |
+| `SENSOR_STUCK_COUNT` | `3` | 固定值诊断次数 |
+| `SENSOR_OFFLINE_SECONDS` | `6` | 传感器离线阈值 |
+| `ACK_TIMEOUT_SECONDS` | `5` | ACK 超时阈值 |
+| `ACTUATOR_FAILURE_LIMIT` | `3` | 执行器熔断阈值 |
+| `CROP_PROFILE_PATH` | `config/crop_profiles.json` | 作物档案路径 |
+| `VITE_API_BASE` | 空 | 前端生产 API 基地址 |
 
 ## 项目结构
 
 ```text
 .
-├── backend/
-│   └── app/
-│       ├── main.py                 # FastAPI 应用入口
-│       ├── api/                    # HTTP / WebSocket 路由
-│       ├── decision_service.py     # 一次完整决策运行服务
-│       ├── action_registry.py      # recommendation 与执行/告警/HITL 注册表
-│       ├── agents/                 # Orchestrator、specialist、融合 Agent
-│       ├── crop_identification_agent.py
-│       ├── crop_profile.py
-│       ├── schemas.py              # Pydantic 请求模型
-│       ├── state.py                 # 进程内运行状态
-│       ├── services.py              # 审计与安全门
-│       ├── tools/                   # MQTT dispatch
-│       └── db/                      # SQLite 审计写入
-├── frontend/                       # React + TypeScript + Vite 控制台
-├── edge/                           # MQTT 订阅器和 HTTP 传感器模拟器
-├── config/                         # 作物档案、安全规则和运行设置
-├── scripts/                        # 模拟与离线镜像制包/启动脚本
-├── tests/                          # 冒烟、管线、服务和动作注册测试
-├── docs/                           # API、架构、安全、部署和运维文档
-├── docker-compose.yml
-├── requirements.txt
-└── README.md
+├── backend/app/
+│   ├── api/                    # REST 与 WebSocket 路由
+│   ├── agents/                 # 专家、融合、HITL 与编排 Agent
+│   ├── decision_service.py     # 统一决策入口
+│   ├── action_registry.py      # recommendation、风险与执行器映射
+│   ├── device_health.py        # 传感器诊断、ACK、熔断
+│   ├── mqtt_runtime.py         # MQTT 输入和 ACK 运行时
+│   ├── local_twin.py           # 无 Broker 时的进程内孪生
+│   └── db/session.py           # SQLite 审计
+├── digital_twin/               # 场景、环境模型和 MQTT 闭环进程
+├── frontend/                   # React + TypeScript + Vite 控制台
+├── edge/mqtt/                  # HTTP 读数模拟器与 MQTT 命令消费者
+├── config/                     # 作物档案及规划配置
+├── scripts/                    # 模拟、离线制包和启动脚本
+├── tests/                      # 后端与闭环回归测试
+├── docs/                       # 架构、API、部署、安全和运维文档
+└── docker-compose.yml          # 四服务编排
 ```
 
-## 测试与质量检查
+## 测试与构建
 
-运行后端测试：
+后端测试：
 
-```bash
-python -m pytest -q
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q
 ```
 
-当前测试覆盖：
+前端类型检查与生产构建：
 
-- `/api/health` 冒烟检查。
-- 作物识别 → 档案 → Orchestrator → 融合 → 安全 → dispatch 管线。
-- 正常、危险、低置信度和 dispatch 失败决策服务场景。
-- HITL approve 通过统一决策服务处理。
-- 全部 Agent recommendation 注册情况。
-- 未知 recommendation 结构化告警。
-- 农药、高风险 pH、执行器白名单和设备互斥规则。
-- 手工执行器命令与自动命令共用动作注册表和安全门。
-
-运行前端检查：
-
-```bash
+```powershell
 cd frontend
 pnpm run typecheck
 pnpm run build
 ```
 
-## 当前边界与后续工作
+当前测试覆盖健康检查、作物识别、Agent 管线、动作注册、安全门、HITL 重新校验、设备诊断、MQTT 状态处理和数字孪生。GitHub Actions 会执行同样的后端测试、类型检查和生产构建。
 
-已接入：
+## 比赛离线启动
 
-- FastAPI REST API、React 控制台和基础 WebSocket 路由。
-- 本地规则型专家 Agent 并行分析。
-- 可选 DeepSeek 作物识别和作物档案生成。
-- 统一决策服务、动作注册表、安全门、HITL 和 MQTT dispatch。
-- SQLite 审计和完整服务级测试。
+在联网电脑上使用最终代码制包：
 
-当前限制：
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\package_offline.ps1
+```
 
-- 运行状态保存在进程内，服务重启后最新读数、决策和待审批列表会丢失；审计可写入 SQLite。
-- `/ws/updates` 当前只发送一次快照，前端使用 4 秒轮询。
-- 专家 Agent 主要是本地规则实现，Prompt 已加载但未统一交给 LLM 执行。
-- 非 Compose 启动且未配置 MQTT Broker 时使用进程内回退；该模式不验证网络层 MQTT 行为。
-- 数字孪生采用教学演示用的一阶变化模型，不是作物生理模型或 CFD 模型。
-- 仓库尚未包含真实设备驱动、病虫害视觉推理模型和固件。
-- 配置 YAML 尚未完全统一接入运行时配置加载。
+脚本会生成：
+
+```text
+deploy/offline/greenhouse-images.tar
+deploy/offline/greenhouse-images.tar.sha256
+```
+
+把完整项目目录复制到比赛电脑后，双击 `start-offline.cmd`。启动脚本只校验并加载预制镜像，然后以 `--no-build --pull never` 启动，不会在现场安装 Python 或 Node 依赖。
+
+详细验收步骤见 [比赛离线冷启动验收](docs/competition/offline-acceptance.md)。
+
+## 当前边界
+
+- 业务状态主要保存在 API 单进程内，重启后最新读数、决策和 HITL 列表会清空；SQLite 只持久化审计。
+- SQLite 写入采用尽力而为策略，失败不会阻断控制流程。
+- 数字孪生是便于演示因果关系的一阶模型，不是作物生理模型或 CFD 模型。
+- 边缘 MQTT 默认 handler 只校验并记录命令，仓库不包含真实硬件驱动。
+- Compose 中的 Mosquitto 允许匿名访问，仅适合本机离线演示。
+- 当前没有用户认证、权限控制、TLS、数据库迁移和多实例状态同步。
+- 接入真实设备前仍需物理急停、独立限位、断电保护、传感器校准和现场风险评估。
 
 ## 文档导航
 
-- [API 说明](docs/api.md)
+- [项目结构与真实运行链路](docs/project-map.md)
+- [API 参考](docs/api.md)
 - [系统架构](docs/architecture.md)
-- [项目文件职责地图](docs/project-map.md)
 - [安全与 HITL](docs/safety.md)
 - [MQTT 协议](docs/mqtt.md)
 - [部署指南](docs/deployment.md)
 - [前端说明](docs/frontend.md)
 - [测试说明](docs/testing.md)
+- [运维手册](docs/operations.md)
 - [故障排查](docs/troubleshooting.md)
 - [硬件接入](docs/hardware.md)
-- [数据库审计](docs/database.md)
 - [用户手册](docs/user_manual.md)
 
-## 安全声明
+## 许可证与安全声明
 
-本项目采用 [MIT License](LICENSE)，面向研究、教学和仿真用途；该许可证不构成生产安全认证或质量担保。接入真实温室前，请完成硬件级风险评估，并至少配置：
-
-- 物理急停和断电保护。
-- 执行器的独立限位与故障回退。
-- MQTT 认证、网络隔离和最小权限。
-- 人工审批、审计留存和异常告警。
-- 传感器校准、阈值验证和现场联调。
-
-不要把当前原型的安全门、模拟状态或默认阈值直接视为真实农业生产环境的充分安全措施。
+本项目采用 [MIT License](LICENSE)，仅面向研究、教学、比赛和仿真验证。MIT 许可证不构成安全认证或质量担保；不要把当前软件安全门、默认阈值或数字孪生结果直接视为真实农业生产环境的充分安全措施。
