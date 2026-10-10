@@ -1,600 +1,115 @@
-# 项目分支图与文件职责
+# 项目结构与真实运行链路
 
-<<<<<<< Updated upstream
-> 本文按当前工作区源码整理。`__pycache__/` 是 Python 运行缓存，`greenhouse.db` 是运行时 SQLite 文件，不在功能分支图中展开。
+本文按当前可运行源码整理。缓存、SQLite 数据库和离线镜像包属于运行产物，不作为源码模块列出。
 
-状态标记：**已接入**=当前入口会调用或已有可运行逻辑；**部分实现**=有规则/接口但仍缺少真实设备、完整策略或联调；**占位**=只有 `Placeholder`；**运行产物**=运行时生成或修改。
-
-## 1. 先看懂系统：两张图
-
-=======
-> 本文按当前工作区源码整理。`__pycache__/` 属于 Python 运行缓存，`greenhouse.db` 是运行时 SQLite 文件，不在功能分支图中展开。
-
-## 1. 先看懂系统：两张图
-
-状态标记：
-
-- **已接入**：当前入口会调用，或已经有可运行逻辑。
-- **部分实现**：有规则/接口，但仍缺少真实设备、持久化、完整策略或联调。
-- **占位**：文件存在，但只有 `Placeholder`，当前不会提供业务能力。
-- **运行产物**：程序运行时生成或修改，不是源码入口。
-
->>>>>>> Stashed changes
-### 1.1 目录分支图
-
-```mermaid
-flowchart TD
-    ROOT[Multi-Agent Greenhouse Cultivation System]
-<<<<<<< Updated upstream
-    ROOT --> R[根目录入口与运行]
-    R --> R1[README.md 项目概览]
-    R --> R2[requirements.txt Python依赖]
-=======
-
-    ROOT --> R[根目录入口与运行]
-    R --> R1[README.md 项目概览]
-    R --> R2[requirements.txt Python 依赖]
->>>>>>> Stashed changes
-    R --> R3[docker-compose.yml 本地容器编排]
-    R --> R4[greenhouse.db 运行时审计库]
-
-    ROOT --> B[backend 后端]
-<<<<<<< Updated upstream
-    B --> B0[app/main.py FastAPI入口]
-    B --> B1[app/api HTTP/WebSocket路由]
-    B --> B2[app/agents 多智能体协作]
-    B --> B3[schemas.py 请求/数据模型]
-    B --> B4[state.py 进程内状态]
-    B --> B5[services.py 安全与审计]
-    B --> B6[db/session.py SQLite写入]
-    B --> B7[prompts Prompt文本]
-    B --> B8[DeepSeek与作物档案]
-    B --> B9[tools/core/db/models 扩展骨架]
-
-    ROOT --> C[config 配置]
-    C --> C1[settings.yaml 应用/MQTT/模型参数]
-    C --> C2[crop_profiles.json 作物条件档案]
-    C --> C3[safety_rules/agents/devices/thresholds 配置]
-
-    ROOT --> E[edge 边缘侧]
-    E --> E1[mqtt publisher/subscriber]
-    E --> E2[drivers 传感器驱动]
-    E --> E3[control 执行器控制]
-    E --> E4[inference 病虫害推理]
-
-    ROOT --> F[frontend 前端]
-    F --> F1[src/main.tsx 当前看板]
-    F --> F2[src/pages 页面预留]
-    F --> F3[src/components 组件预留]
-
-    ROOT --> G[docs 设计、接口、运维、演示]
-    ROOT --> H[scripts/tests/notebooks]
-    ROOT --> I[deploy 部署扩展]
-```
-
-### 1.2 当前真实的控制链
+## 1. 控制闭环
 
 ```mermaid
 flowchart LR
-    SENSOR[HTTP传感器或 edge/mqtt/publisher.py]
-      --> INGEST[POST /api/sensors/readings]
-      --> STATE[state.latest/history]
-      --> RUN[POST /api/agents/run]
-
-    RUN --> IDENT{无作物档案且有图像?}
-    IDENT -->|是| CROP[顶层 crop_identification_agent.py]
-    CROP --> PROFILE[crop_profile.py<br/>DeepSeek或本地档案]
-    IDENT -->|否| ORCH[agents/orchestrator.py]
-    PROFILE --> ORCH
-    ORCH --> REG[registry.build_agents]
-    REG --> SPEC[土壤/温度/湿度/灌溉/光照CO2/阶段]
-    REG --> PEST[RuleAgent: pest]
-    SPEC --> FUSE[DecisionFusionAgent.fuse]
-    PEST --> FUSE
-    ORCH --> FUSE
-    FUSE --> GATE[SafetyHITLAgent + services.safety]
-    GATE -->|阻断| HITL[state.hitl + audit]
-    GATE -->|通过| DISPATCH[tools/actuator_dispatch.py]
-    DISPATCH -->|有MQTT_BROKER| MQTT[MQTT greenhouse/actuators/commands]
-    DISPATCH -->|无Broker| SKIP[skipped_no_broker]
-    GATE --> DEC[state.decisions + audit]
-    DEC --> UI[dashboard/decisions/WebSocket]
+    TWIN[数字孪生] -->|MQTT 传感器| MQTT[Mosquitto]
+    MQTT --> API[FastAPI MQTT 运行时]
+    HTTP[HTTP 传感器输入] --> API
+    API --> AGENTS[多智能体分析]
+    AGENTS --> FUSION[决策融合]
+    FUSION --> SAFETY[安全规则与设备诊断]
+    SAFETY -->|安全通过| COMMAND[MQTT 控制命令]
+    SAFETY -->|危险或故障| HITL[人工审批]
+    HITL -->|批准| RECHECK[使用最新传感器重新校验]
+    RECHECK --> SAFETY
+    COMMAND --> TWIN
+    TWIN -->|ACK| MQTT
+    MQTT --> API
+    API --> UI[React 控制台]
 ```
 
-关键理解：现在的 MQTT 下发只发生在 `/api/agents/run` 生成的命令通过安全门之后；未配置 `MQTT_BROKER` 时只返回 `skipped_no_broker`。直接 `/api/actuators/command` 会经过融合白名单和安全检查，但当前只更新状态/审计，不直接调用 MQTT dispatch。
-
-## 2. 根目录
-
-| 文件 | 功能 | 状态 |
-|---|---|---|
-| `README.md` | 项目简介、启动命令和粗粒度结构导览。 | 已接入/概览 |
-| `requirements.txt` | FastAPI、Uvicorn、Pydantic、httpx、pytest、paho-mqtt 等后端依赖。 | 已接入 |
-| `docker-compose.yml` | 启动 API 与前端开发容器；容器内安装依赖并运行 Uvicorn/Vite。 | 部分实现 |
-| `greenhouse.db` | SQLite 运行产物，主要保存 `audit` 表。 | 运行产物 |
-
-## 3. `backend`：后端应用
-
-### 3.1 入口、状态、模型、服务
-=======
-    B --> B0[app/main.py FastAPI 入口]
-    B --> B1[app/api HTTP/WebSocket 路由]
-    B --> B2[app/agents 多智能体协作]
-    B --> B3[app/schemas.py 请求/数据模型]
-    B --> B4[app/state.py 进程内状态]
-    B --> B5[app/services.py 安全与审计]
-    B --> B6[app/db/session.py SQLite 写入]
-    B --> B7[app/prompts Prompt 文本]
-    B --> B8[app/tools、core、db/models 扩展骨架]
-
-    ROOT --> C[config 配置]
-    C --> C1[settings.yaml 应用与 DeepSeek/MQTT 参数]
-    C --> C2[safety_rules.yaml 安全阈值]
-    C --> C3[agents/devices/thresholds.yaml 预留配置]
-
-    ROOT --> E[edge 边缘侧]
-    E --> E1[mqtt/publisher.py 模拟传感器上报]
-    E --> E2[mqtt/subscriber.py MQTT 命令订阅]
-    E --> E3[drivers 传感器驱动骨架]
-    E --> E4[control 执行器控制骨架]
-    E --> E5[inference 病虫害推理骨架]
-
-    ROOT --> F[frontend 前端]
-    F --> F1[src/main.tsx 当前最小看板]
-    F --> F2[src/pages 页面预留]
-    F --> F3[src/components 组件预留]
-    F --> F4[src/services/api.ts API 封装预留]
-
-    ROOT --> G[docs 设计、接口、运维与演示文档]
-    ROOT --> H[scripts、tests、notebooks]
-    H --> H1[run_simulation.py 仿真入口]
-    H --> H2[test_smoke.py 冒烟测试]
-    H --> H3[其余校准/评估/知识库/Notebook 骨架]
-    ROOT --> I[deploy 部署扩展配置]
-```
-
-### 1.2 一次控制循环的真实调用链
-
-```mermaid
-flowchart LR
-    SENSOR[客户端或 edge/mqtt/publisher.py]
-      --> INGEST[POST /api/sensors/readings]
-      --> STATE[state.latest]
-      --> RUN[POST /api/agents/run]
-
-    RUN --> ORCH[agents/orchestrator.py]
-    ORCH --> REG[agents/registry.py]
-    REG --> SPECIALISTS[土壤 / 温度 / 湿度 / 灌溉 / 光照CO2 / 生长阶段]
-    REG --> RULE[RuleAgent: pest]
-    ORCH --> CROP[顶层 crop_identification_agent.py]
-
-    SPECIALISTS --> FUSE[DecisionFusionAgent.fuse]
-    CROP --> FUSE
-    FUSE --> HITL[SafetyHITLAgent.evaluate]
-
-    HITL -->|allow| DECISION[state.decisions + audit]
-    HITL -->|need_hitl| PENDING[state.hitl + audit]
-    DECISION --> DASH[dashboard / decisions / WebSocket]
-    PENDING --> HITL_API[/api/hitl pending/approve/reject]
-
-    ACT[/api/actuators/command/] --> SAFETY[services.safety]
-    SAFETY -->|通过| AUDIT[services.audit]
-    SAFETY -->|拒绝| PENDING
-```
-
-关键理解：当前的“执行”止于安全检查和审计。`/api/actuators/command` 没有调用真实驱动，后端也没有把命令发布到 MQTT；`edge/mqtt/subscriber.py` 只是预留的消费端。
-
-## 2. 根目录文件
-
-| 文件 | 功能 | 状态 |
-|---|---|---|
-| `README.md` | 项目简介、启动命令、粗粒度结构导览。 | 已接入（内容偏概览） |
-| `requirements.txt` | FastAPI、Uvicorn、Pydantic、HTTP 客户端、pytest、paho-mqtt 等后端依赖。 | 已接入 |
-| `docker-compose.yml` | 启动 `api` 和 `frontend` 两个开发容器；运行时安装依赖并启动服务。 | 部分实现 |
-| `greenhouse.db` | SQLite 运行产物，当前主要保存 `audit` 表。 | 运行产物 |
-
-## 3. `backend`：后端应用
-
-### 3.1 启动、状态、模型、服务
->>>>>>> Stashed changes
-
-| 文件 | 功能 | 状态 |
-|---|---|---|
-| `backend/__init__.py` | Python 包标记。 | 已接入 |
-| `backend/app/__init__.py` | 应用包标记。 | 已接入 |
-<<<<<<< Updated upstream
-| `backend/app/main.py` | 创建 FastAPI，开启 CORS，挂载 sensors/agents/decisions/hitl/actuators/dashboard/ws 路由。 | 已接入 |
-| `backend/app/agents.py` | 旧版单文件 Agent 调度；当前 FastAPI 主入口使用的是 `backend/app/agents/` 包。 | 重复/旧入口 |
-| `backend/app/schemas.py` | `SensorReading`、`CropTriggerRequest`、`ActuatorCommand` 三类 Pydantic 数据模型。 | 已接入 |
-| `backend/app/state.py` | 最新传感器、历史、决策、HITL、Agent 缓存、作物档案、天气、执行器状态。主要是进程内状态，重启会丢失。 | 已接入/非持久化 |
-| `backend/app/services.py` | `audit()` 写内存事件并尝试写 SQLite；`safety()` 拦截极端温度、越界 pH、农药命令。 | 已接入/部分硬编码 |
-| `backend/app/prompt_loader.py` | 优先读取 `backend/prompts`；只有新目录不存在时才整体回退到旧目录 `backend/app/prompts`；同时替换模板变量并清理未解析 token。 | 已接入 |
-| `backend/app/services/prompt_loader.py` | 顶层 PromptLoader 的兼容导出。 | 已接入/兼容层 |
-| `backend/app/deepseek_client.py` | OpenAI 兼容的 DeepSeek JSON 客户端；支持图片、超时、重试和 JSON 清洗。 | 已接入/可选外部服务 |
-| `backend/app/core/logging.py` | 配置标准 Python 日志。 | 已接入 |
-| `backend/app/core/config.py` | 统一配置读取预留。 | 占位 |
-| `backend/app/core/constants.py` | 常量集中定义预留。 | 占位 |
-| `backend/app/core/security.py` | 认证/授权安全层预留。 | 占位 |
-
-### 3.2 API 路由
-=======
-| `backend/app/main.py` | 创建 FastAPI 应用，开启宽松 CORS，挂载所有 API/WebSocket 路由，并在启动时配置日志。 | 已接入 |
-| `backend/app/schemas.py` | 定义 `SensorReading`、`CropTriggerRequest`、`ActuatorCommand` 三类 Pydantic 输入模型。 | 已接入 |
-| `backend/app/state.py` | 保存最新传感器、决策、HITL、Agent 缓存和当前作物档案的进程内全局状态。重启会丢失。 | 已接入（非持久化） |
-| `backend/app/services.py` | `audit()` 记录内存事件并尝试写 SQLite；`safety()` 对极端温度、越界 pH、农药命令做硬编码拦截。 | 已接入（规则硬编码） |
-| `backend/app/prompt_loader.py` | 读取 Markdown Prompt 并替换 `{{变量}}`；文件不存在时返回通用 fallback。 | 部分实现 |
-| `backend/app/services/prompt_loader.py` | 另一份同名 PromptLoader 实现；目前没有统一到顶层实现。 | 部分实现/重复 |
-| `backend/app/core/logging.py` | 配置标准 Python 日志格式。 | 已接入 |
-| `backend/app/core/config.py` | 预留统一配置读取入口。 | 占位 |
-| `backend/app/core/constants.py` | 预留常量集中定义。 | 占位 |
-| `backend/app/core/security.py` | 预留认证、授权或安全策略。 | 占位 |
-
-### 3.2 HTTP 与 WebSocket API
->>>>>>> Stashed changes
-
-| 文件 | 路由与职责 | 状态 |
-|---|---|---|
-| `backend/app/api/__init__.py` | API 包标记。 | 已接入 |
-<<<<<<< Updated upstream
-| `backend/app/api/sensors.py` | `POST /api/sensors/readings` 更新读数、历史和审计；`GET /api/sensors/latest` 查询。 | 已接入 |
-| `backend/app/api/agents.py` | `POST /api/agents/run` 完成识别/档案、并行 Agent、决策融合、安全/HITL、MQTT dispatch；另有作物识别、分析、确认、状态接口。 | 已接入/主业务入口 |
-| `backend/app/api/decisions.py` | 查询决策列表和最新决策。 | 已接入 |
-| `backend/app/api/hitl.py` | 查询 pending HITL，支持 approve/reject 并审计。 | 已接入（批准后没有自动重跑决策） |
-| `backend/app/api/actuators.py` | 手工命令走 DecisionFusion 白名单和安全门；通过后更新执行器状态并审计。 | 部分实现 |
-| `backend/app/api/dashboard.py` | 看板汇总、审计、审计历史、硬编码阈值、健康检查。 | 已接入 |
-| `backend/app/api/ws.py` | WebSocket 建连后发送一次状态快照；没有持续推送循环。 | 部分实现 |
-
-### 3.3 多智能体 `backend/app/agents/`
-
-| 文件 | 功能 | 状态 |
-|---|---|---|
-| `backend/app/agents/__init__.py` | 暴露 `orchestrator`、`run_all` 和 Agent 名称。 | 已接入 |
-| `backend/app/agents/base.py` | Agent 基类及统一结果字段。 | 已接入 |
-| `backend/app/agents/orchestrator.py` | 构造作物/传感器/历史/天气/执行器上下文，并发运行 registry 中 Agent；已有档案时避免重复识别。 | 已接入 |
-| `backend/app/agents/registry.py` | 构造 soil、temperature、humidity、irrigation、light_co2、crop_stage；pest 用 RuleAgent。 | 已接入 |
-| `backend/app/agents/specialists.py` | 通用规则 Agent，目前主要承接 pest。 | 部分实现 |
-| `backend/app/agents/soil_agent.py` | 判断 pH、EC、土壤水分，生成调 pH、灌溉、排水或人工复核建议。 | 部分实现 |
-| `backend/app/agents/temperature_agent.py` | 按作物温度档案判断加热、通风和 P0 紧急风险。 | 部分实现 |
-| `backend/app/agents/humidity_agent.py` | 判断高低湿、结露/病害风险、通风和喷雾。 | 部分实现 |
-| `backend/app/agents/irrigation_agent.py` | 判断灌溉、停灌、排水和阀故障。 | 部分实现 |
-| `backend/app/agents/light_co2_agent.py` | 判断补光、遮阳、CO2 建议。 | 部分实现 |
-| `backend/app/agents/crop_stage_agent.py` | 读取当前档案生长阶段并建议更新阶段阈值。 | 部分实现 |
-| `backend/app/agents/decision_agent.py` | 去重并把建议字符串映射成安全候选执行器命令，同时加载融合 Prompt。 | 部分实现 |
-| `backend/app/agents/hitl_agent.py` | 对极端温度、越界 pH、农药命令返回 `allow`/`need_hitl`。 | 已接入/规则有限 |
-| `backend/app/agents/crop_identification_agent.py` | 顶层识别 Agent 的向后兼容导出，避免旧 import 失效。 | 已接入/兼容层 |
-| `backend/app/agents/memory_agent.py` | 记忆与经验学习 Agent 预留。 | 占位 |
-| `backend/app/agents/pest_agent.py` | 独立病虫害 Agent 预留；当前由 RuleAgent 代替。 | 占位 |
-| `backend/app/agents/graph/workflow.py` | 图式工作流入口预留。 | 占位 |
-| `backend/app/agents/graph/edges.py` | 图式工作流边和条件路由预留。 | 占位 |
-| `backend/app/agents/graph/state.py` | 图式工作流状态预留。 | 占位 |
-
-### 3.4 作物、数据库与工具
-
-| 文件 | 功能 | 状态 |
-|---|---|---|
-| `backend/app/crop_identification_agent.py` | 先调用 DeepSeek（若配置 Key），失败时按图片 URL/元数据关键词 fallback；低置信度或未知作物要求人工确认。 | 已接入 |
-| `backend/app/crop_profile.py` | 管理番茄/生菜/草莓/黄瓜/辣椒默认档案；可让 DeepSeek生成并归一化，持久化到 `config/crop_profiles.json`。 | 已接入/本地 fallback |
-| `backend/app/crop_trigger.py` | 管理 startup、换季、换作物、档案不匹配和 168 小时周期触发。 | 已接入/内存状态 |
-| `backend/app/db/session.py` | 原生 sqlite3 创建 `audit` 表并写审计。 | 已接入 |
-| `backend/app/db/models/actuator.py` | 执行器 ORM/模型预留。 | 占位 |
-| `backend/app/db/models/audit.py` | 审计 ORM/模型预留；实际写入仍在 session.py。 | 占位 |
-| `backend/app/db/models/decision.py` | 决策模型预留。 | 占位 |
-| `backend/app/db/models/hitl.py` | HITL 模型预留。 | 占位 |
-| `backend/app/db/models/sensor.py` | 传感器模型预留。 | 占位 |
-| `backend/app/tools/actuator_dispatch.py` | 对安全后的命令做执行器白名单检查；有 Broker 时批量发布 MQTT，无 Broker 时返回跳过。 | 已接入 |
-| `backend/app/tools/actuator_tool.py` | `actuator_dispatch` 的兼容导出。 | 已接入/兼容层 |
-| `backend/app/tools/image_tool.py` | 图像工具预留。 | 占位 |
-| `backend/app/tools/rag_tool.py` | RAG/知识库工具预留。 | 占位 |
-| `backend/app/tools/sensor_tool.py` | 传感器工具预留。 | 占位 |
-| `backend/app/tools/weather_tool.py` | 天气工具预留。 | 占位 |
-
-### 3.5 Prompt 文件
-
-当前 `PromptLoader` 优先读取 `backend/prompts/*.md`；`backend/app/prompts/` 是旧兼容目录（按目录整体回退）。Prompt 只描述角色、输入变量和输出 JSON 约束，不负责执行 Python 或直接控制设备。
-
-| 文件 | 存放内容 |
-|---|---|
-| `backend/prompts/crop_identification.md` | 作物识别 JSON、置信度和人工确认条件。 |
-| `backend/prompts/crop_profile.md` | 作物阶段与温湿度/光照/CO2/pH/EC/水分档案生成。 |
-| `backend/prompts/crop_stage.md` | 生长阶段判断。 |
-| `backend/prompts/decision_fusion.md` | 专家结果融合为候选执行命令。 |
-| `backend/prompts/humidity.md` | 湿度/VPD/结露风险。 |
-| `backend/prompts/irrigation.md` | 灌溉、水分、天气、阀门状态。 |
-| `backend/prompts/light_co2.md` | 光照、DLI、CO2、补光、遮阳。 |
-| `backend/prompts/orchestrator.md` | 调度和数据上下文。 |
-| `backend/prompts/soil.md` | pH、EC、土壤水分。 |
-| `backend/prompts/temperature.md` | 温度、热害和冷害。 |
-| `backend/app/prompts/*.md` | 旧版较详细的中文 Prompt；作为兼容内容保留。 | 
-
-## 4. `config/` 配置与档案
-
-| 文件 | 设计用途 | 当前情况 |
-|---|---|---|
-| `config/settings.yaml` | 应用名、数据库、MQTT 主题、作物识别周期、DeepSeek 模型/重试参数。 | 有内容；部分参数仍由环境变量读取。 |
-| `config/crop_profiles.json` | 已保存的作物条件档案，当前已有番茄本地 fallback 档案。 | 已接入 |
-| `config/safety_rules.yaml` | 温度和 pH 安全阈值。 | 文件存在，但部分运行规则仍在 Python 中。 |
-| `config/agents.yaml` | Agent 启用/调度配置预留。 | 占位 |
-| `config/devices.yaml` | 设备清单预留。 | 占位 |
-| `config/thresholds.yaml` | 阈值集中配置预留。 | 占位 |
-
-## 5. `edge/` 边缘设备
-
-| 文件 | 功能 | 状态 |
-|---|---|---|
-| `edge/requirements.txt` | 边缘侧 paho-mqtt 依赖。 | 已接入 |
-| `edge/mqtt/publisher.py` | 每 5 秒生成随机传感器读数并通过 HTTP 写入后端；名称虽含 MQTT，当前是 HTTP 模拟器。 | 部分实现 |
-| `edge/mqtt/subscriber.py` | 启动 MQTT 执行器命令订阅。 | 已接入 |
-| `edge/mqtt/command_handler.py` | 解析 JSON、校验执行器白名单并调用可注入 Handler。 | 已接入/默认只记录日志 |
-| `edge/drivers/camera.py` | 摄像头驱动预留。 | 占位 |
-| `edge/drivers/humidity.py` | 湿度驱动预留。 | 占位 |
-| `edge/drivers/ph_ec.py` | pH/EC 驱动预留。 | 占位 |
-| `edge/drivers/soil_moisture.py` | 土壤水分驱动预留。 | 占位 |
-| `edge/drivers/temperature.py` | 温度驱动预留。 | 占位 |
-| `edge/control/fan.py` | 风机控制预留。 | 占位 |
-| `edge/control/relay.py` | 继电器控制预留。 | 占位 |
-| `edge/control/valve.py` | 阀门控制预留。 | 占位 |
-| `edge/inference/pest_detection.py` | 边缘病虫害推理预留。 | 占位 |
-
-## 6. `frontend/` 前端
-
-| 文件 | 功能 | 状态 |
-|---|---|---|
-| `frontend/index.html` | Vite HTML 容器，加载 `src/main.tsx`。 | 已接入 |
-| `frontend/package.json` | React/Vite/TypeScript 依赖及 dev/build 脚本。 | 已接入 |
-| `frontend/src/main.tsx` | 当前最小看板：请求 dashboard summary，显示传感器、Agent 数和待审批数。 | 部分实现 |
-| `frontend/src/style.css` | 当前页面基础样式。 | 已接入/简版 |
-| `frontend/src/App.tsx` | App 组件预留。 | 占位 |
-=======
-| `backend/app/api/sensors.py` | `POST /api/sensors/readings` 更新 `state.latest` 并审计；`GET /api/sensors/latest` 查询最新读数。 | 已接入 |
-| `backend/app/api/agents.py` | `POST /api/agents/run` 执行一轮 Agent→融合→HITL；提供 Agent 状态和作物识别触发/状态接口。 | 已接入（主业务入口） |
-| `backend/app/api/decisions.py` | 查询全部决策或最新决策。 | 已接入 |
-| `backend/app/api/hitl.py` | 查询待人工处理项，以及 approve/reject 更新状态并审计。 | 已接入（不自动恢复原决策） |
-| `backend/app/api/actuators.py` | 接收手工执行器命令，先走 `services.safety()`，通过后只记审计并返回 accepted。 | 部分实现（没有真实下发） |
-| `backend/app/api/dashboard.py` | 健康检查、看板汇总、审计列表/历史、硬编码阈值接口。 | 已接入（汇总为内存状态） |
-| `backend/app/api/ws.py` | 接受 WebSocket 后发送一次状态快照；没有持续推送循环。 | 部分实现 |
-
-### 3.3 多智能体目录 `backend/app/agents/`
-
-| 文件 | 功能 | 状态 |
-|---|---|---|
-| `backend/app/agents/__init__.py` | 暴露 `orchestrator`、`run_all`、`AGENT_NAMES`。 | 已接入 |
-| `backend/app/agents/base.py` | Agent 基类和统一 `result()` 输出格式。 | 已接入 |
-| `backend/app/agents/orchestrator.py` | 创建上下文，并发运行 registry 中的 specialists，再追加作物识别结果。 | 已接入（上下文多为默认空值） |
-| `backend/app/agents/registry.py` | 根据名称构造 soil、temperature、humidity、irrigation、light_co2、crop_stage；pest 使用 `RuleAgent`。 | 已接入（有重复 import） |
-| `backend/app/agents/specialists.py` | 通用规则 Agent；当前主要承担 pest，另有旧规则分支。 | 部分实现 |
-| `backend/app/agents/soil_agent.py` | 按 pH、EC、土壤水分生成风险和灌溉/调 pH 建议。 | 部分实现 |
-| `backend/app/agents/temperature_agent.py` | 按作物温度范围判断加热/通风和紧急风险。 | 部分实现 |
-| `backend/app/agents/humidity_agent.py` | 按湿度判断通风/喷雾、结露和病害风险。 | 部分实现 |
-| `backend/app/agents/irrigation_agent.py` | 按土壤水分和阀故障判断灌溉、停灌、排水。 | 部分实现 |
-| `backend/app/agents/light_co2_agent.py` | 按光照、温度、CO2 判断补光、遮阳和 CO2 建议。 | 部分实现 |
-| `backend/app/agents/crop_stage_agent.py` | 读取档案中的生长阶段，并建议更新阶段阈值。 | 部分实现 |
-| `backend/app/agents/decision_agent.py` | 把少数字符串建议映射为 `ventilation/irrigation/heating` 命令，并加载融合 Prompt。 | 部分实现（映射不完整） |
-| `backend/app/agents/hitl_agent.py` | 对极端温度、越界 pH、农药命令返回 `allow` 或 `need_hitl`。 | 已接入（规则有限） |
-| `backend/app/agents/crop_identification_agent.py` | 与顶层同名模块的另一份简化识别实现；当前主 Orchestrator 不直接导入它。 | 重复/未接主链 |
-| `backend/app/agents/memory_agent.py` | 记忆与经验学习 Agent 预留位置。 | 占位 |
-| `backend/app/agents/pest_agent.py` | 独立病虫害 Agent 预留位置；当前由 `RuleAgent('pest')` 代替。 | 占位 |
-| `backend/app/agents/graph/workflow.py` | 图式工作流入口预留。 | 占位 |
-| `backend/app/agents/graph/edges.py` | 图式工作流边/路由预留。 | 占位 |
-| `backend/app/agents/graph/state.py` | 图式工作流状态预留。 | 占位 |
-
-### 3.4 作物识别、数据访问与工具
-
-| 文件 | 功能 | 状态 |
-|---|---|---|
-| `backend/app/crop_identification_agent.py` | 顶层作物识别入口；根据图片 URL、元数据和用户输入中的关键词识别五类作物，低置信度/未知作物要求人工确认。 | 已接入（关键词 fallback，无视觉模型） |
-| `backend/app/crop_trigger.py` | 控制作物识别首次启动、换季、换作物、档案不匹配或周期到期时是否运行，默认 168 小时。 | 已接入（内存状态） |
-| `backend/app/db/session.py` | 使用原生 `sqlite3` 创建 `audit` 表并写入审计事件。 | 已接入 |
-| `backend/app/db/models/actuator.py` | 执行器 ORM/模型预留。 | 占位 |
-| `backend/app/db/models/audit.py` | 审计 ORM/模型预留；当前未使用，实际写入在 `session.py`。 | 占位 |
-| `backend/app/db/models/decision.py` | 决策模型预留。 | 占位 |
-| `backend/app/db/models/hitl.py` | HITL 模型预留。 | 占位 |
-| `backend/app/db/models/sensor.py` | 传感器模型预留。 | 占位 |
-| `backend/app/tools/actuator_tool.py` | 执行器工具接口预留。 | 占位 |
-| `backend/app/tools/image_tool.py` | 图像输入/处理工具预留。 | 占位 |
-| `backend/app/tools/rag_tool.py` | 知识库/RAG 工具预留。 | 占位 |
-| `backend/app/tools/sensor_tool.py` | 传感器查询工具预留。 | 占位 |
-| `backend/app/tools/weather_tool.py` | 天气数据工具预留。 | 占位 |
-
-### 3.5 Prompt 文件 `backend/app/prompts/`
-
-这些文件是“给模型看的规则/角色说明”，不是 Python 执行器；真正的加载入口是 `prompt_loader.py`。当前源码中的顶层 Loader 默认寻找 `backend/prompts/`，但仓库实际保存的是 `backend/app/prompts/`，因此大多数调用会落到 `Return valid structured JSON.` fallback；这是当前需要优先修正的路径不一致。
-
-| 文件 | 存放内容 |
-|---|---|
-| `crop_identification.md` | 作物种类/品种/生长阶段识别及人工确认条件。 |
-| `crop_stage.md` | 生长阶段判断规则与阶段阈值输出格式。 |
-| `decision_fusion.md` | 多 Agent 输出融合、优先级、冲突消解和安全检查格式。 |
-| `hitl.md` | 何时必须人工介入及 HITL 输出格式。 |
-| `humidity.md` | 湿度、VPD、结露和病害风险分析规则。 |
-| `irrigation.md` | 灌溉、水分、天气和阀门状态分析规则。 |
-| `light_co2.md` | 光照、DLI、CO2、补光和遮阳规则。 |
-| `memory.md` | 观察—动作—结果记录和知识更新格式。 |
-| `orchestrator.md` | 调度、数据质量检查、并行调用和冲突检测规则。 |
-| `soil.md` | pH、EC、土壤水分及肥料/化学品安全规则。 |
-| `temperature.md` | 温度、热害/冷害、昼夜温差和优先级规则。 |
-
-## 4. 配置目录 `config/`
-
-| 文件 | 设计用途 | 当前实际情况 |
-|---|---|---|
-| `config/settings.yaml` | 应用名、数据库、MQTT 主题、作物识别周期、DeepSeek 参数。 | 文件有内容，但当前没有统一 Loader 读取它。 |
-| `config/safety_rules.yaml` | 温度和 pH 安全阈值。 | 文件有内容，但 `services.safety()` 仍硬编码同类规则。 |
-| `config/agents.yaml` | Agent 是否启用、调度策略。 | 占位。 |
-| `config/devices.yaml` | 设备清单和能力描述。 | 占位。 |
-| `config/thresholds.yaml` | 作物/环境阈值集中配置。 | 占位；specialist 主要读 `crop_profile` 或代码默认值。 |
-
-## 5. 边缘侧 `edge/`
-
-| 文件 | 功能 | 状态 |
-|---|---|---|
-| `edge/requirements.txt` | 边缘侧 MQTT 依赖。 | 已接入 |
-| `edge/mqtt/publisher.py` | 每 5 秒生成随机温湿度/土壤水分，并通过 HTTP 写入后端传感器接口。名字虽叫 MQTT publisher，当前实际是 HTTP 模拟器。 | 部分实现 |
-| `edge/mqtt/subscriber.py` | 启动 MQTT 命令订阅；当前直接导入 `command_handler.subscribe`。 | 部分实现 |
-| `edge/mqtt/command_handler.py` | 预留命令解析和执行器 Handler 路由。 | 当前文件不存在；由 subscriber 的导入约定可见为缺口 |
-| `edge/drivers/camera.py` | 摄像头驱动预留。 | 占位 |
-| `edge/drivers/humidity.py` | 湿度传感器驱动预留。 | 占位 |
-| `edge/drivers/ph_ec.py` | pH/EC 传感器驱动预留。 | 占位 |
-| `edge/drivers/soil_moisture.py` | 土壤水分传感器驱动预留。 | 占位 |
-| `edge/drivers/temperature.py` | 温度传感器驱动预留。 | 占位 |
-| `edge/control/fan.py` | 风机控制预留。 | 占位 |
-| `edge/control/relay.py` | 通用继电器控制预留。 | 占位 |
-| `edge/control/valve.py` | 阀门控制预留。 | 占位 |
-| `edge/inference/pest_detection.py` | 边缘病虫害推理预留。 | 占位 |
-
-## 6. 前端 `frontend/`
-
-| 文件 | 功能 | 状态 |
-|---|---|---|
-| `frontend/index.html` | Vite HTML 容器，提供 `#root` 并加载 `src/main.tsx`。 | 已接入 |
-| `frontend/package.json` | React/Vite/TypeScript 依赖和 dev/build 脚本。 | 已接入 |
-| `frontend/src/main.tsx` | 当前唯一实际 UI：请求 `/api/dashboard/summary`，显示传感器、Agent 数和待审批数。 | 部分实现 |
-| `frontend/src/style.css` | 当前最小页面样式。 | 已接入（简版） |
-| `frontend/src/App.tsx` | 预留 App 组件；目前是 Placeholder。 | 占位 |
->>>>>>> Stashed changes
-| `frontend/src/components/AgentCard.tsx` | Agent 卡片预留。 | 占位 |
-| `frontend/src/components/AlertBanner.tsx` | 告警条预留。 | 占位 |
-| `frontend/src/components/DecisionPanel.tsx` | 决策面板预留。 | 占位 |
-| `frontend/src/components/SensorCard.tsx` | 传感器卡片预留。 | 占位 |
-| `frontend/src/pages/Agents.tsx` | Agent 页面预留。 | 占位 |
-| `frontend/src/pages/Dashboard.tsx` | 看板页面预留。 | 占位 |
-| `frontend/src/pages/GreenhouseMap.tsx` | 温室地图页面预留。 | 占位 |
-<<<<<<< Updated upstream
-| `frontend/src/pages/History.tsx` | 历史记录页面预留。 | 占位 |
-| `frontend/src/pages/HITL.tsx` | 人工审批页面预留。 | 占位 |
-| `frontend/src/services/api.ts` | API 封装预留。 | 占位 |
-| `frontend/tsconfig.json` | TypeScript 配置预留。 | 占位 |
-| `frontend/vite.config.ts` | Vite 配置预留。 | 占位 |
-| `frontend/Dockerfile` | 前端镜像构建预留。 | 占位 |
-
-## 7. `docs/` 文档分别放什么
-
-| 文档 | 内容 |
-|---|---|
-| `docs/README.md` | 文档目录入口；当前是 Placeholder。 |
-| `docs/project-map.md` | 本文件：分支图、运行链路、文件职责和缺口。 |
-| `docs/architecture.md` | Orchestrator→专家 Agent→Decision Fusion→HITL 的目标架构。 |
-| `docs/api.md` | FastAPI 接口、作物识别接口和控制闭环说明。 |
-| `docs/agent_prompts.md` | Prompt 变量、加载目录和 specialist→融合→HITL→MQTT 顺序。 |
-| `docs/crop-identification.md` | 作物识别触发、置信度、人工确认、档案分析。 |
-| `docs/database.md` | SQLite 审计表及未来 PostgreSQL/Alembic 建议。 |
-| `docs/deployment.md` | pip、uvicorn、docker compose 启动方法。 |
-| `docs/frontend.md` | Vite + React + TypeScript 前端说明。 |
-| `docs/hardware.md` | 传感器、继电器和断电安全要求。 |
-| `docs/mqtt.md` | 传感器/执行器主题和 JSON 约定。 |
-| `docs/operations.md` | 健康检查、审计查询、数据库位置。 |
-| `docs/safety.md` | 极端温度、危险 pH、农药命令的人工审批原则。 |
-| `docs/testing.md` | pytest 和仿真脚本用法。 |
-| `docs/troubleshooting.md` | 端口、HITL、SQLite 排查提示。 |
-| `docs/user_manual.md` | 安装、启动、访问 `/docs` 和运行仿真。 |
-| `docs/competition/README.md` | 赛事演示范围。 |
-| `docs/competition/demo-script.md` | 正常读数与 `temperature=45` 的演示步骤。 |
-
-这些文档中有一部分描述的是目标态。是否“真的接通”应以源码的 import 和调用链为准；例如配置 YAML 并非全部被读取，前端页面和边缘驱动也仍有占位文件。
-
-## 8. 脚本、测试、Notebook、部署
-
-| 文件/目录 | 功能 | 状态 |
-|---|---|---|
-| `scripts/run_simulation.py` | 发送三轮异常读数并触发 `/api/agents/run`，用于手工演示。 | 已接入 |
-| `scripts/calibrate_sensors.py` | 传感器校准预留。 | 占位 |
-| `scripts/eval_agents.py` | Agent 评估预留。 | 占位 |
-| `scripts/seed_knowledge.py` | 知识库初始化预留。 | 占位 |
-| `tests/test_smoke.py` | TestClient 健康检查。 | 已接入 |
-| `tests/test_crop_pipeline.py` | 验证识别→档案→Orchestrator→融合→安全→dispatch 的离线链路，以及未知作物 HITL。 | 已接入 |
-| `notebooks/pest_detection.ipynb` | 病虫害实验预留。 | 占位 |
-| `notebooks/threshold_analysis.ipynb` | 阈值分析预留。 | 占位 |
-| `backend/Dockerfile` | Python 3.11 后端镜像并启动 Uvicorn。 | 已接入 |
-| `deploy/mosquitto/mosquitto.conf` | Mosquitto 配置预留。 | 占位 |
-| `deploy/nginx/nginx.conf` | Nginx 反向代理预留。 | 占位 |
-| `data/raw/`、`processed/`、`uploads/`、`logs/`、`vector_store/` | 原始/处理/上传/日志/向量知识库目录。 | 当前为空目录 |
-| `deploy/docker/`、`deploy/grafana/`、`deploy/k8s/` | 容器、监控、Kubernetes 扩展目录。 | 当前为空目录 |
-
-## 9. 推荐读代码顺序
-
-1. `backend/app/main.py`：确认服务挂载了哪些入口。
-2. `backend/app/api/agents.py`：理解当前主业务闭环。
-3. 沿 `run()` 阅读 `crop_identification_agent.py`、`crop_profile.py`、`agents/orchestrator.py`、`agents/registry.py`。
-4. 阅读 specialists，再看 `decision_agent.py`、`hitl_agent.py` 和 `tools/actuator_dispatch.py`。
-5. 最后看 `services.py`、`db/session.py`、`state.py`，掌握安全、审计和重启后的数据边界。
-6. 需要扩展功能时，再进入 `config/`、`edge/`、`frontend/src/pages/`、`graph/`、`tools/` 和 `deploy/`。
-
-## 10. 当前最重要的缺口
-
-1. **specialist 主要仍是本地规则**：它们会加载 Prompt，但没有像作物识别/档案分析那样直接调用 DeepSeek。
-2. **执行器链路是可选的**：没有 `MQTT_BROKER` 时不下发；真实传感器驱动和控制器仍为空。
-3. **配置不是单一事实来源**：YAML 的 Agent、设备、阈值配置没有统一加载，部分规则仍写在 Python 中。
-4. **状态主要在内存**：决策、HITL、最新读数、档案上下文会受进程重启影响；SQLite 目前主要存审计。
-5. **前端仍是最小页面**：路由页、组件和 API 封装只是骨架。
-6. **图工作流、记忆、RAG、天气、真实传感器尚未实现**：目录表示未来扩展方向，不表示当前可用。
-=======
-| `frontend/src/pages/History.tsx` | 历史记录页面预留。 | ��位 |
-| `frontend/src/pages/HITL.tsx` | 人工审批页面预留。 | 占位 |
-| `frontend/src/services/api.ts` | 前端 API 封装预留。 | 占位 |
-| `frontend/tsconfig.json` | TypeScript 编译配置预留。 | 占位 |
-| `frontend/vite.config.ts` | Vite 配置预留。 | 占位 |
-| `frontend/Dockerfile` | 前端镜像构建预留。 | 占位 |
-
-## 7. 文档目录 `docs/`
-
-| 文档 | 存放内容 |
-|---|---|
-| `docs/README.md` | 文档目录入口；当前是 Placeholder。 |
-| `docs/project-map.md` | 本文件：结构分支图、运行链路、文件职责和当前缺口。 |
-| `docs/architecture.md` | Orchestrator→专家 Agent→Decision Fusion→HITL 的目标架构。 |
-| `docs/api.md` | FastAPI 接口、作物识别接口和控制闭环说明。 |
-| `docs/agent_prompts.md` | Prompt 变量约定、加载规则和 specialist→融合→HITL→MQTT 的目标顺序。 |
-| `docs/crop-identification.md` | 作物识别触发时机、置信度、人工确认和档案分析设计。 |
-| `docs/database.md` | SQLite 审计表说明，以及未来 PostgreSQL/Alembic 建议。 |
-| `docs/deployment.md` | pip、uvicorn、docker compose 启动方式。 |
-| `docs/frontend.md` | Vite + React + TypeScript 前端说明。 |
-| `docs/hardware.md` | 温湿度、土壤水分、pH、EC、光照、CO2 和执行器安全要求。 |
-| `docs/mqtt.md` | 传感器/执行器主题和 JSON 消息约定。 |
-| `docs/operations.md` | 健康检查、审计查询和数据库文件位置。 |
-| `docs/safety.md` | 极端温度、危险 pH、农药命令必须人工审批的安全原则。 |
-| `docs/testing.md` | pytest 和仿真脚本的运行方法。 |
-| `docs/troubleshooting.md` | 端口、HITL 触发和 SQLite 检查提示。 |
-| `docs/user_manual.md` | 安装、启动、访问 `/docs` 和运行仿真的简明手册。 |
-| `docs/competition/README.md` | 赛事演示要展示实时数据、多 Agent、安全拦截、HITL、审计。 |
-| `docs/competition/demo-script.md` | 用正常读数和 `temperature=45` 演示 Agent 与 HITL。 |
-
-这些文档主要描述“目标系统”，不能直接等价为当前实现。例如文档提到 MQTT 下发、配置化阈值、完整作物档案和丰富前端页面，而当前源码仍有占位或硬编码。
-
-## 8. 脚本、测试、Notebook 与部署配置
-
-| 文件/目录 | 功能 | 状态 |
-|---|---|---|
-| `scripts/run_simulation.py` | 向后端写入三轮固定异常读数并调用 `/api/agents/run`，用于手工演示。 | 已接入（依赖后端运行） |
-| `scripts/calibrate_sensors.py` | 传感器校准脚本预留。 | 占位 |
-| `scripts/eval_agents.py` | Agent 评估脚本预留。 | 占位 |
-| `scripts/seed_knowledge.py` | 知识库初始化脚本预留。 | 占位 |
-| `tests/test_smoke.py` | 用 FastAPI TestClient 检查 `/api/health` 返回 `ok`。 | 已接入（当前环境缺 FastAPI 时无法收集） |
-| `notebooks/pest_detection.ipynb` | 病虫害实验 Notebook 预留。 | 占位 |
-| `notebooks/threshold_analysis.ipynb` | 阈值分析 Notebook 预留。 | 占位 |
-| `backend/Dockerfile` | 基于 Python 3.11 构建后端镜像并运行 Uvicorn。 | 已接入 |
-| `deploy/mosquitto/mosquitto.conf` | Mosquitto Broker 配置预留。 | 占位 |
-| `deploy/nginx/nginx.conf` | Nginx 反向代理配置预留。 | 占位 |
-| `data/raw/` | 原始数据目录。 | 当前为空目录 |
-| `data/processed/` | 处理后数据目录。 | 当前为空目录 |
-| `data/uploads/` | 图像/上传文件目录。 | 当前为空目录 |
-| `data/logs/` | 文件日志目录。 | 当前为空目录 |
-| `data/vector_store/` | 向量知识库目录。 | 当前为空目录 |
-| `deploy/docker/`、`deploy/grafana/`、`deploy/k8s/` | 未来容器、监控、Kubernetes 部署扩展目录。 | 当前为空目录 |
-
-## 9. 读代码的推荐顺序
-
-1. 先看 `backend/app/main.py`，确认应用挂载了哪些入口。
-2. 再看 `backend/app/api/agents.py`，它是当前核心业务闭环。
-3. 沿 `run()` 跳到 `agents/orchestrator.py` → `registry.py` → 各 specialist。
-4. 看 `decision_agent.py` 和 `hitl_agent.py`，理解“建议如何变成命令、何时拦截”。
-5. 最后看 `services.py`、`db/session.py`、`state.py`，理解审计、持久化边界和重启后的数据损失。
-6. 需要理解未来扩展时，再看 `config/`、`edge/`、`frontend/src/pages/`、`graph/` 和 `tools/` 的占位文件。
-
-## 10. 当前最重要的结构性缺口
-
-1. **Prompt 路径不一致**：顶层 `backend/app/prompt_loader.py` 指向不存在的 `backend/prompts/`，实际 Prompt 在 `backend/app/prompts/`。
-2. **两套 Agent 入口并存**：`backend/app/agents.py` 是旧版简化实现；当前 FastAPI 使用 `backend/app/agents/` 包，维护时不要把两条链混在一起。
-3. **执行器尚未真正接通**：决策会生成命令，但 API 只审计；`edge` 端驱动和控制器仍是占位。
-4. **配置尚未成为单一事实来源**：YAML 中的安全阈值和 Agent 配置没有统一加载，部分阈值直接写在 Python 中。
-5. **状态主要在内存**：决策、HITL、最新传感器重启即丢；SQLite 目前只保存审计事件。
-6. **前端/图工作流/记忆/RAG/天气/真实传感器仍是骨架**：目录代表扩展方向，不代表功能已经可用。
-7. **文档与实现存在目标态差异**：`docs/` 描述了更完整的目标闭环，阅读时以源码调用关系判断“当前是否真的接通”。
->>>>>>> Stashed changes
+危险决策不会保存并重放旧命令。人工批准后，系统使用最新传感器重新运行决策和安全检查；设备故障审批只解除熔断，下一轮决策再生成新命令。
+
+## 2. 根目录与部署
+
+| 路径 | 当前职责 |
+| --- | --- |
+| `README.md` | 项目说明、启动方式、API 与比赛演示入口 |
+| `requirements.txt` | 固定版本的 Python 依赖 |
+| `docker-compose.yml` | 编排 Mosquitto、API、数字孪生和前端；端口仅绑定 `127.0.0.1` |
+| `backend/Dockerfile` | 构建 API 与数字孪生共用的 Python 镜像 |
+| `frontend/Dockerfile` | 使用 pnpm 锁文件构建前端，再由 Nginx 提供静态资源 |
+| `start-offline.cmd` | Windows 比赛现场离线一键启动入口 |
+| `.github/workflows/ci.yml` | 执行 pytest、前端 typecheck 和生产构建 |
+| `LICENSE` | MIT 许可证 |
+
+## 3. 后端 `backend/app/`
+
+| 路径 | 当前职责 |
+| --- | --- |
+| `main.py` | FastAPI 入口；挂载路由并启停 MQTT、健康监控和本地孪生 |
+| `schemas.py` | 传感器、决策和命令模型；包含合理数据范围校验 |
+| `state.py` | 当前读数、决策、HITL、ACK、设备诊断等单进程状态 |
+| `decision_service.py` | 统一完成 Agent 调度、融合、安全、HITL、下发和审批后重新校验 |
+| `action_registry.py` | recommendation 到执行器命令的白名单、风险和 HITL 定义 |
+| `device_health.py` | 固定值、离线、ACK 超时、失败计数、熔断和设备故障 HITL |
+| `mqtt_runtime.py` | 订阅传感器、孪生状态和 ACK，并触发统一决策服务 |
+| `local_twin.py` | 未配置 MQTT Broker 时的进程内数字孪生回退 |
+| `services.py` | 审计与兼容安全接口 |
+| `db/session.py` | 使用 SQLite 保存审计事件 |
+| `tools/actuator_dispatch.py` | 分配 command_id、建立 ACK 截止时间并发布 MQTT 命令 |
+
+### API 路由
+
+| 路径 | 当前职责 |
+| --- | --- |
+| `api/dashboard.py` | 总览、审计、阈值和健康检查 |
+| `api/sensors.py` | 传感器写入与最新值读取 |
+| `api/agents.py` | Agent 状态、运行和作物识别/档案接口 |
+| `api/decisions.py` | 决策运行与最近决策 |
+| `api/hitl.py` | 待审批、批准和拒绝 |
+| `api/actuators.py` | 经过动作注册表和安全门的手工控制 |
+| `api/digital_twin.py` | 场景列表、切换、状态与诊断 |
+| `api/ws.py` | 状态快照 WebSocket |
+
+### Agent
+
+`agents/orchestrator.py` 并行调度温度、湿度、土壤、灌溉、光照/CO₂、生育期和病害规则分析；`agents/decision_agent.py` 负责融合为已注册动作。DeepSeek 仅用于可选的作物识别与档案生成，未配置密钥时使用本地回退。
+
+## 4. 数字孪生 `digital_twin/`
+
+| 路径 | 当前职责 |
+| --- | --- |
+| `engine.py` | 环境动态、执行器作用、传感器/执行器故障注入和 ACK |
+| `scenarios.py` | 正常、极端环境、传感器和执行器故障场景 |
+| `main.py` | MQTT 闭环进程；发布传感器与状态并更新容器健康心跳 |
+
+## 5. 前端 `frontend/`
+
+前端是已完成并参与构建的 React 控制台，不是占位模块。
+
+| 路径 | 当前职责 |
+| --- | --- |
+| `src/App.tsx` | 页面导航和应用级错误边界 |
+| `src/pages/Dashboard.tsx` | 实时指标、孪生场景、故障注入/诊断、设备控制、Agent 时间线和 HITL 抽屉 |
+| `src/pages/Agents.tsx` | Agent 运行状态和分析结果 |
+| `src/pages/HITL.tsx` | 人工审批、最新状态重新校验和设备熔断处理 |
+| `src/pages/History.tsx` | 审计事件查询与中文格式化 |
+| `src/pages/GreenhouseMap.tsx` | 温室分区和设备状态 |
+| `src/components/` | 传感器、Agent、决策、告警和空状态组件 |
+| `src/services/api.ts` | 带超时和错误归一化的 API 客户端 |
+| `src/utils/i18n.ts` | 动态协议值到中文展示文案的集中映射 |
+| `pnpm-lock.yaml` | 前端可复现依赖锁文件 |
+
+## 6. 部署、脚本与测试
+
+| 路径 | 当前职责 |
+| --- | --- |
+| `deploy/mosquitto/mosquitto.conf` | 仅供本机 Compose 使用的匿名 MQTT Broker 配置 |
+| `deploy/nginx/default.conf` | 前端静态资源和 `/api`、`/ws` 反向代理 |
+| `scripts/package_offline.ps1` | 构建并导出比赛离线镜像包与 SHA-256 |
+| `scripts/start_offline.ps1` | 校验、加载镜像并以禁止拉取/构建模式启动和验收 |
+| `scripts/run_simulation.py` | HTTP 传感器与决策冒烟脚本 |
+| `tests/` | 决策、安全、HITL、设备诊断、数字孪生和 API 回归测试 |
+| `docs/competition/offline-acceptance.md` | 新电脑断网冷启动与兜底录屏清单 |
+
+## 7. 已知边界
+
+- 业务状态主要保存在单个 API 进程内，重启会清空；SQLite 仅持久化审计。
+- WebSocket 当前返回状态快照，前端主要使用 4 秒轮询。
+- Compose 的匿名 MQTT 仅适合端口绑定到 `127.0.0.1` 的离线比赛演示；开放到局域网或公网前必须增加认证和 TLS。
+- 当前闭环验证对象是数字孪生；接入真实硬件时需要单独实现驱动、校准和设备侧失联保护。

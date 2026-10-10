@@ -1,17 +1,64 @@
 services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    restart: unless-stopped
+    volumes:
+      - "./deploy/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro"
+    ports: ["127.0.0.1:1883:1883"]
+    healthcheck:
+      test: ["CMD", "mosquitto_pub", "-h", "127.0.0.1", "-t", "greenhouse/healthcheck", "-m", "ping"]
+      interval: 5s
+      timeout: 4s
+      retries: 10
+
   api:
-    image: python:3.11-slim
-    working_dir: /app
-    volumes: [".:/app"]
+    image: greenhouse-api:0.2.0
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
     environment:
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com/v1}
-      MQTT_BROKER: ${MQTT_BROKER:-}
-    command: sh -c "pip install -r requirements.txt && uvicorn backend.app.main:app --host 0.0.0.0 --port 8000"
-    ports: ["8000:8000"]
+      MQTT_BROKER: mosquitto
+      MQTT_PORT: 1883
+    ports: ["127.0.0.1:8000:8000"]
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  digital-twin:
+    image: greenhouse-api:0.2.0
+    restart: unless-stopped
+    environment:
+      MQTT_BROKER: mosquitto
+      MQTT_PORT: 1883
+      TWIN_INTERVAL_SECONDS: ${TWIN_INTERVAL_SECONDS:-2}
+      TWIN_HEALTH_FILE: /tmp/digital-twin-health
+    command: ["python", "-m", "digital_twin.main"]
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os,time; p='/tmp/digital-twin-health'; assert os.path.exists(p) and time.time()-os.path.getmtime(p)<10"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
   frontend:
-    image: node:20-alpine
-    working_dir: /app/frontend
-    volumes: [".:/app"]
-    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
-    ports: ["5173:5173"]
+    image: greenhouse-frontend:0.2.0
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    restart: unless-stopped
+    ports: ["127.0.0.1:5173:80"]
+    depends_on:
+      api:
+        condition: service_healthy

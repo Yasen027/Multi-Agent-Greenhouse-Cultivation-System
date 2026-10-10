@@ -1,6 +1,7 @@
 /** 温室地图页：SVG 布局展示分区、传感器点位与执行器状态（4 秒轮询） */
 
 import { useEffect, useMemo, useState } from 'react';
+import { RefreshCw } from 'lucide-react';
 import { AlertBanner } from '../components/AlertBanner';
 import { levelOf, type SensorLevel } from '../components/SensorCard';
 import { Loading } from '../components/StatusViews';
@@ -9,6 +10,7 @@ import { api, describeError } from '../services/api';
 import { DEFAULT_THRESHOLDS, type NumericSensorKey, type Thresholds } from '../types';
 import { formatTime } from '../utils/format';
 
+// 传感器等级 → SVG 描边颜色（正常绿 / 偏低橙 / 偏高红 / 未知灰）
 const LEVEL_COLOR: Record<SensorLevel, string> = {
   normal: '#2e7d4f',
   low: '#d97706',
@@ -16,6 +18,7 @@ const LEVEL_COLOR: Record<SensorLevel, string> = {
   unknown: '#94a3b8',
 };
 
+// 传感器等级 → 中文文案（与点位下方标签一致）
 const LEVEL_TEXT: Record<SensorLevel, string> = {
   normal: '正常',
   low: '偏低',
@@ -23,6 +26,7 @@ const LEVEL_TEXT: Record<SensorLevel, string> = {
   unknown: '未知',
 };
 
+// 传感器点位配置：key 对应读数字段，x/y 为 800×470 视口内的固定坐标
 interface Spot {
   key: NumericSensorKey;
   label: string;
@@ -32,6 +36,7 @@ interface Spot {
   digits: number;
 }
 
+// 7 个传感器点位：上方 4 个（光照/温度/湿度/CO₂），下方 3 个（pH/土壤湿度/EC）
 const SENSOR_SPOTS: Spot[] = [
   { key: 'light', label: '光照', x: 150, y: 175, unit: 'lx', digits: 0 },
   { key: 'temperature', label: '温度', x: 270, y: 190, unit: '°C', digits: 1 },
@@ -49,6 +54,7 @@ interface ActuatorSpot {
   y: number;
 }
 
+// 8 个执行器点位：顶部遮阳/通风/补光/迷雾，两侧加热/风机/CO₂/灌溉
 const ACTUATOR_SPOTS: ActuatorSpot[] = [
   { key: 'shade', label: '遮阳', x: 400, y: 62 },
   { key: 'ventilation', label: '通风', x: 600, y: 88 },
@@ -57,9 +63,10 @@ const ACTUATOR_SPOTS: ActuatorSpot[] = [
   { key: 'heating', label: '加热', x: 110, y: 205 },
   { key: 'fan', label: '风机', x: 690, y: 205 },
   { key: 'co2', label: 'CO₂ 补充', x: 690, y: 300 },
-  { key: 'irrigation', label: '灌溉阀', x: 400, y: 446 },
+  { key: 'irrigation', label: '灌溉阀', x: 110, y: 300 },
 ];
 
+// 执行器 key → 完整中文名（点位短标签之外的补充说明）
 const ACTUATOR_LABEL: Record<string, string> = {
   shade: '遮阳网',
   ventilation: '通风口',
@@ -71,6 +78,7 @@ const ACTUATOR_LABEL: Record<string, string> = {
   irrigation: '灌溉阀',
 };
 
+// 执行器状态 → 填充色：on 绿色、off 灰色、未知浅灰（stateText 负责文案）
 function stateColor(state: string | undefined): string {
   if (state === 'on') return '#16a34a';
   if (state === 'off') return '#94a3b8';
@@ -83,6 +91,7 @@ function stateText(state: string | undefined): string {
   return '未知';
 }
 
+// 仅对配置了阈值的指标做等级判断；土壤湿度使用固定 30–70 范围
 function rangeFor(key: NumericSensorKey, t: Thresholds): { min: number; max: number } | undefined {
   if (key === 'temperature') return t.temperature;
   if (key === 'humidity') return t.humidity;
@@ -95,6 +104,7 @@ export function GreenhouseMap() {
   const { data, error, loading, refreshing, refresh } = usePolling(api.getDashboardSummary);
   const [thresholds, setThresholds] = useState<Thresholds>(DEFAULT_THRESHOLDS);
 
+  // 加载阈值配置；失败时静默回退到 DEFAULT_THRESHOLDS
   useEffect(() => {
     let cancelled = false;
     api
@@ -113,6 +123,7 @@ export function GreenhouseMap() {
   const reading = data?.sensor ?? null;
   const decision = data?.decision ?? null;
 
+  // 最新决策的执行器 → 动作映射：用于点亮地图点位与右侧状态列表
   const actuatorActions = useMemo(() => {
     const map: Record<string, string> = {};
     for (const cmd of decision?.priority_actions ?? []) map[cmd.actuator] = cmd.action;
@@ -130,7 +141,7 @@ export function GreenhouseMap() {
         </div>
         <div className="toolbar-actions">
           <button type="button" className="btn btn-ghost" onClick={refresh} disabled={refreshing}>
-            {refreshing ? '刷新中…' : '🔄 刷新'}
+            <RefreshCw size={16} aria-hidden /> {refreshing ? '刷新中…' : '刷新'}
           </button>
         </div>
       </div>
@@ -139,6 +150,7 @@ export function GreenhouseMap() {
         <Loading label="正在获取温室状态…" />
       ) : (
         <section className="card map-card">
+          {/* 平面布局：天空/地面、温室轮廓、A/B/C 种植区、传感器与执行器点位 */}
           <svg className="map-svg" viewBox="0 0 800 470" role="img" aria-label="温室平面布局图">
             {/* 天空与地面 */}
             <rect x="0" y="0" width="800" height="470" fill="#f0f7f0" />
@@ -211,7 +223,7 @@ export function GreenhouseMap() {
 
             {/* 标题 */}
             <text x="400" y="18" textAnchor="middle" fontSize="15" fontWeight="700" fill="#173b2a">
-              温室布局 · Greenhouse Map
+              温室布局
             </text>
           </svg>
 
@@ -237,6 +249,7 @@ export function GreenhouseMap() {
             </span>
           </div>
 
+          {/* 下方两栏：环境概览列表 + 执行器状态列表 */}
           <div className="map-columns">
             <div className="map-overview">
               <h3 className="panel-title">环境概览</h3>

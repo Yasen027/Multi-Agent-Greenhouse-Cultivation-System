@@ -1,6 +1,9 @@
+# 应用全局配置（规划/默认值参考）。注意：运行时代码当前不直接读取本文件，
+# 实际运行参数多来自环境变量（见 README「环境变量」表）与对应运行模块的默认值。
 app_name: Greenhouse MAS
 database: greenhouse.db
 mqtt_topic: greenhouse/sensors/#
+# 作物识别触发策略：是否启用、最小触发间隔、启动/换季/换作物/档案不匹配时是否触发。
 crop_identification:
   enabled: true
   interval_hours: 168
@@ -8,6 +11,7 @@ crop_identification:
   run_on_new_season: true
   run_on_crop_change: true
   run_on_profile_mismatch: true
+# DeepSeek 可选接入参数：未配置 API Key 时系统走本地识别/档案回退。
 deepseek:
   base_url: https://api.deepseek.com/v1
   model: deepseek-chat

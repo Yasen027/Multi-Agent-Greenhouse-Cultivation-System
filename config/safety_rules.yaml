@@ -1,3 +1,5 @@
+# 安全门阈值（规划/默认值参考）。注意：运行时代码目前并不读取本文件，
+# 对应判断位于 backend/app/services.py 的安全门逻辑中，请以代码内常量为准。
 temperature_max: 40
 ph_min: 4
 ph_max: 8
