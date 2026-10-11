@@ -350,7 +350,7 @@ grow_light · shade · co2 · fan
 | `MQTT_ACK_TOPIC` | `greenhouse/actuators/ack` | 执行结果 ACK 主题 |
 | `MQTT_TWIN_SCENARIO_TOPIC` | `greenhouse/digital-twin/scenario` | 比赛场景切换主题 |
 | `TWIN_INTERVAL_SECONDS` | `2` | 数字孪生推进周期（秒） |
-| `SENSOR_STUCK_COUNT` | `3` | 单个传感器字段连续相同多少次后判定疑似卡死 |
+| `SENSOR_STUCK_COUNT` | `10` | 单个传感器字段连续相同多少次后判定疑似卡死 |
 | `SENSOR_OFFLINE_SECONDS` | `6` | 无有效传感器读数多久后判定离线 |
 | `ACK_TIMEOUT_SECONDS` | `5` | 每条执行器命令等待 ACK 的截止时间 |
 | `ACTUATOR_FAILURE_LIMIT` | `3` | 单执行器连续失败多少次后熔断并创建 HITL |
