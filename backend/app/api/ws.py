@@ -14,7 +14,10 @@ async def updates(socket: WebSocket):
         {
             "sensor": state.latest.model_dump(),
             "decision": state.decisions[0] if state.decisions else None,
-            "pending_hitl": sum(x["status"] == "pending" for x in state.hitl),
+            "pending_hitl": sum(
+                item["status"] == "pending" and item.get("incident_active", True)
+                for item in state.hitl
+            ),
             "agents": len(state.agent_cache),
         }
     )

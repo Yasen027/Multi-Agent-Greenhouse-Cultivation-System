@@ -22,6 +22,7 @@ services:
       DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com/v1}
       MQTT_BROKER: mosquitto
       MQTT_PORT: 1883
+      SENSOR_STUCK_COUNT: ${SENSOR_STUCK_COUNT:-10}
     ports: ["127.0.0.1:8000:8000"]
     depends_on:
       mosquitto:

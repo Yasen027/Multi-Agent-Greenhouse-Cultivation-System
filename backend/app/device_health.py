@@ -87,7 +87,9 @@ def reset_health() -> None:
 # 记录一次传感器读数：先清除离线/越界问题，再逐字段统计连续不变次数，达到阈值判定卡死。
 def record_sensor(reading: dict[str, Any], received_at: datetime | None = None) -> None:
     before = set(state.sensor_issues)
-    threshold = _limit("SENSOR_STUCK_COUNT", 3)
+    # 三次相同在两位小数的高频采样中很常见，默认观察 10 个周期再判定卡死。
+    # 现场若需要更快验证固定值故障，仍可通过 SENSOR_STUCK_COUNT 调低。
+    threshold = _limit("SENSOR_STUCK_COUNT", 10)
     device_id = str(reading.get("device_id", "unknown"))
     previous = state.sensor_last_values.setdefault(device_id, {})
     repeats = state.sensor_repeat_counts.setdefault(device_id, {})

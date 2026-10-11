@@ -49,8 +49,9 @@ def test_mqtt_sensor_and_ack_update_shared_state():
     assert state.actuator_state.get("fan") != "on"
 
 
-def test_sensor_range_and_stuck_diagnostics_are_real():
+def test_sensor_range_and_stuck_diagnostics_are_real(monkeypatch):
     _reset()
+    monkeypatch.setenv("SENSOR_STUCK_COUNT", "3")
     runtime = MqttRuntime()
     for index in range(3):
         accepted = runtime._handle_sensor(
@@ -75,6 +76,32 @@ def test_sensor_range_and_stuck_diagnostics_are_real():
         issue["code"] == "out_of_range"
         for issue in health_snapshot()["sensor"]["issues"]
     )
+
+
+def test_three_equal_samples_do_not_trigger_stuck_by_default(monkeypatch):
+    _reset()
+    monkeypatch.delenv("SENSOR_STUCK_COUNT", raising=False)
+    runtime = MqttRuntime()
+    reading = {
+        "device_id": "stable-test",
+        "temperature": 25,
+        "humidity": 68,
+        "soil_moisture": 45,
+        "ph": 6.2,
+        "ec": 1.8,
+        "light": 650,
+        "co2": 650,
+        "_twin": {"online": True, "scenario": "normal"},
+    }
+
+    for _ in range(3):
+        assert runtime._handle_sensor(reading) is True
+
+    assert not [
+        issue
+        for issue in health_snapshot()["sensor"]["issues"]
+        if issue["code"] == "sensor_stuck"
+    ]
 
 
 def test_sensor_offline_and_ack_deadline_are_diagnosed():

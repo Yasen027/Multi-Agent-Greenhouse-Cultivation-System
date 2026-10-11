@@ -56,11 +56,15 @@ def _open_hitl_once(kind: str, signature: str, payload: Dict[str, Any]) -> bool:
     return True
 
 
-# 把指定 kind 的审批事件标记为已结束：事件消除后不再拦截后续决策。
+# 结束指定 kind 的审批事件：异常已消失时同步关闭仍待处理的旧审批。
 def _clear_hitl_incident(kind: str) -> None:
     for item in state.hitl:
-        if item.get("incident_kind") == kind:
-            item["incident_active"] = False
+        if item.get("incident_kind") != kind or not item.get("incident_active"):
+            continue
+        item["incident_active"] = False
+        if item.get("status") == "pending":
+            item["status"] = "resolved"
+            audit("hitl_resolved", item)
 
 
 # 单个智能体运行结果的统一结构：归一化各智能体返回字段，未知字段收进 extra。
@@ -294,7 +298,9 @@ class DecisionService:
                 },
             )
         else:
-            _clear_hitl_incident("decision")
+            # 人工批准重校验通过时，由 approve_hitl 在命令下发后将原审批置为 approved。
+            if trigger != "hitl_approval":
+                _clear_hitl_incident("decision")
             decision.dispatch = DispatchResult.from_value(dispatch_commands(commands))
         payload = decision.to_dict()
         state.decisions.insert(0, payload)

@@ -78,6 +78,7 @@ def test_service_dangerous_reading_creates_hitl_and_never_dispatches(monkeypatch
 def test_service_blocks_when_sensor_is_diagnosed_as_stuck(monkeypatch):
     reading = SensorReading(temperature=25)
     _reset(reading)
+    monkeypatch.setenv("SENSOR_STUCK_COUNT", "3")
     for index in range(3):
         payload = reading.model_dump()
         payload["humidity"] += index
@@ -252,6 +253,29 @@ def test_continuous_incident_creates_only_one_hitl_request(monkeypatch):
     asyncio.run(service_module.decision_service.run(SensorReading(temperature=25)))
     asyncio.run(service_module.decision_service.run(SensorReading(temperature=41)))
     assert len(state.hitl) == 2
+
+
+def test_recovered_incident_exits_pending_queue(monkeypatch):
+    _reset(SensorReading(temperature=41))
+    monkeypatch.setattr(
+        service_module, "run_all", lambda *args: _async_value(_agents())
+    )
+    monkeypatch.setattr(
+        service_module,
+        "dispatch_commands",
+        lambda commands: {"status": "published", "count": len(commands)},
+    )
+
+    asyncio.run(service_module.decision_service.run())
+    item = state.hitl[0]
+    assert TestClient(app).get("/api/hitl/pending").json()
+
+    asyncio.run(service_module.decision_service.run(SensorReading(temperature=25)))
+
+    assert item["status"] == "resolved"
+    assert item["incident_active"] is False
+    assert TestClient(app).get("/api/hitl/pending").json() == []
+    assert TestClient(app).get("/api/dashboard/summary").json()["pending_hitl"] == 0
 
 
 def _async_value(value):

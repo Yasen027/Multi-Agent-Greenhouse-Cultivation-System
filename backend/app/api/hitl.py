@@ -9,8 +9,12 @@ router = APIRouter(prefix="/api/hitl", tags=["hitl"])
 
 @router.get("/pending")
 def pending():
-    # 仅返回仍处于 pending 状态的人工介入单。
-    return [x for x in state.hitl if x["status"] == "pending"]
+    # 仅返回仍待处理且事件尚未恢复的人工介入单；无 incident_active 的旧类型保持兼容。
+    return [
+        item
+        for item in state.hitl
+        if item["status"] == "pending" and item.get("incident_active", True)
+    ]
 
 
 async def update(id, status):

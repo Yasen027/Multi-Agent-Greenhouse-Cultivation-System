@@ -29,8 +29,11 @@ def summary():
         "sensor": state.latest,
         # decisions 列表头部即最新决策。
         "decision": state.decisions[0] if state.decisions else None,
-        # 统计仍处于 pending 的 HITL 单数量。
-        "pending_hitl": sum(x["status"] == "pending" for x in state.hitl),
+        # 与审批列表一致：只统计仍待处理且事件尚未恢复的 HITL 单。
+        "pending_hitl": sum(
+            item["status"] == "pending" and item.get("incident_active", True)
+            for item in state.hitl
+        ),
         "agents": len(state.agent_cache),
         "digital_twin": twin,
         # 仅返回最近 8 条执行器 ACK。
